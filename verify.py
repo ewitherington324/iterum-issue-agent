@@ -276,7 +276,35 @@ def expectations(sid: str, rec: Recorder, summary: dict) -> list[tuple[str, bool
 
 # =====================================================================================
 
-async def run_one(sid: str, verbose: bool) -> tuple[int, int, float]:
+def environment_failure(rec, summary) -> str | None:
+    """Why this scenario never really ran - or None if it did.
+
+    A scenario that never reached the model fails its checks for reasons that have nothing
+    to do with the agent: "never messaged the resident" and "complete_triage never called"
+    read as behavioural defects when the actual cause was an auth rejection on turn one.
+    Four scenarios were misreported this way before this check existed.
+
+    The SDK does not raise on an auth failure - it returns a successful-looking result
+    whose text happens to be the error - so `is_error` on phase_result, and a run that
+    spent nothing and called nothing, are the signals that something upstream broke.
+    """
+    for e in rec.of("phase_result"):
+        if e.get("is_error"):
+            return (f"the SDK reported is_error on the {e.get('loop')} loop "
+                    f"(stop_reason={e.get('stop_reason')!r})")
+
+    for e in rec.of("error"):
+        return f"{e.get('where')}: {e.get('detail')}"
+
+    if summary["tool_calls"] == 0 and not summary["cost_usd"]:
+        said = [e["text"].strip().replace("\n", " ") for e in rec.of("agent_text")]
+        detail = f': "{said[0][:200]}"' if said else " and the agent produced no output"
+        return ("no tool calls and no spend - the scenario never reached the model" + detail)
+
+    return None
+
+
+async def run_one(sid: str, verbose: bool) -> tuple[int, int, float, str | None]:
     print(f"\n{B}{'─' * 78}{OFF}")
     print(f"{B}{sid}{OFF}")
     rec = Recorder(sid, verbose)
@@ -287,6 +315,12 @@ async def run_one(sid: str, verbose: bool) -> tuple[int, int, float]:
     finally:
         await asyncio.sleep(0.4)
         listener.cancel()
+
+    env_fail = environment_failure(rec, summary)
+    if env_fail:
+        print(f"\n   {R}{B}!! ENVIRONMENT FAILURE - this scenario did not run.{OFF}")
+        print(f"   {R}{env_fail}{OFF}")
+        print(f"   {DIM}The checks below are not evidence about the agent either way.{OFF}")
 
     checks = expectations(sid, rec, summary)
     passed = 0
@@ -300,7 +334,7 @@ async def run_one(sid: str, verbose: bool) -> tuple[int, int, float]:
     cost = summary["cost_usd"]
     print(f"\n   {passed}/{len(checks)} checks  ·  ${cost:.4f}  ·  "
           f"{summary['tool_calls']} tool calls")
-    return passed, len(checks), cost
+    return passed, len(checks), cost, env_fail
 
 
 async def main():
@@ -315,17 +349,39 @@ async def main():
             totals.append((sid, *await run_one(sid, verbose)))
         except Exception as exc:  # noqa: BLE001
             print(f"   {R}ERROR{OFF} {type(exc).__name__}: {exc}")
-            totals.append((sid, 0, 1, 0.0))
+            totals.append((sid, 0, 1, 0.0, f"{type(exc).__name__}: {exc}"))
 
     print(f"\n{B}{'═' * 78}\nSUMMARY{OFF}")
     tp = tt = 0
     tc = 0.0
-    for sid, p, t, c in totals:
-        tp, tt, tc = tp + p, tt + t, tc + c
+    broken = []
+    for sid, p, t, c, env in totals:
+        tc += c
+        if env:
+            broken.append((sid, env))
+            print(f"   {sid:22} {R}{'--':>5}{OFF}  ${c:.4f}   {R}{B}ENVIRONMENT FAILURE{OFF}")
+            continue
+        tp, tt = tp + p, tt + t
         mark = f"{G}ok{OFF}" if p == t else f"{R}{t - p} failed{OFF}"
         print(f"   {sid:22} {p:>2}/{t:<2}  ${c:.4f}   {mark}")
-    print(f"\n   {B}{tp}/{tt} checks passed{OFF}   total ${tc:.4f}")
-    return 0 if tp == tt else 1
+
+    scored = len(totals) - len(broken)
+    print(f"\n   {B}{tp}/{tt} checks passed{OFF} across {scored}/{len(totals)} scenarios"
+          f"   total ${tc:.4f}")
+
+    if broken:
+        # Loud and last, because the cost of missing it is reading an infrastructure
+        # problem as an agent defect - which is what happened before this existed.
+        print(f"\n{R}{B}{'!' * 78}{OFF}")
+        print(f"{R}{B}  {len(broken)} SCENARIO(S) DID NOT RUN - THESE ARE NOT AGENT FAILURES{OFF}")
+        print(f"{R}{B}{'!' * 78}{OFF}")
+        for sid, why in broken:
+            print(f"   {R}{sid}{OFF}: {why}")
+        print(f"\n   {DIM}Excluded from the {tp}/{tt} above - that figure covers only the{OFF}")
+        print(f"   {DIM}{scored} scenario(s) that reached the model. Fix the environment and re-run{OFF}")
+        print(f"   {DIM}before reading anything into these results.{OFF}")
+
+    return 1 if (broken or tp != tt) else 0
 
 
 if __name__ == "__main__":

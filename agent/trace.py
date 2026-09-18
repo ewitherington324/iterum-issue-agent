@@ -21,6 +21,14 @@ from .events import BUS
 
 LOG_PATH = Path(__file__).resolve().parents[1] / "logs" / "decision_log.jsonl"
 
+# Whether log entries are coming from a live scenario run or from selftest.py driving the
+# hooks directly. selftest sets this to "selftest" at import. Without it the two are
+# indistinguishable in decision_log.jsonl, and they are not equivalent evidence: every
+# guardrail_block in the log to date was written by selftest exercising the hook
+# synthetically, while no guardrail has yet fired in a live run. A reader with no way to
+# tell them apart would reasonably conclude the guardrails fire in production.
+RUN_SOURCE = "live"
+
 PREFIX = "mcp__iterum__"
 
 # PRD 5.2: in-warranty repairs are activated and managed through the OEM. The agent does
@@ -35,6 +43,10 @@ LOGGED_TOOLS = {
     "assess_repair_vs_replace", "submit_recommendation", "send_engineer_message",
     "send_email", "book_visit", "confirm_visit", "close_job", "complete_triage",
     "conclude_booking", "send_ops_message",
+    # Logged for its `reference_matched` flag: it is the only record of whether the
+    # triage skill's fault reference actually reached the model. Without it a skill
+    # that silently stopped matching would still produce plausible steps (invariant 6).
+    "get_triage_steps",
 }
 
 
@@ -45,7 +57,8 @@ def short_name(tool_name: str) -> str:
 def log_decision(event: str, **payload: Any) -> None:
     """Append-only. This file is the dataset that would eventually validate the model."""
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    record = {"at": datetime.utcnow().isoformat() + "Z", "event": event, **payload}
+    record = {"at": datetime.utcnow().isoformat() + "Z", "event": event,
+              "run_source": RUN_SOURCE, **payload}
     try:
         s = session.current()
         record.setdefault("issue_id", s.issue_id)

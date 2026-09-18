@@ -21,6 +21,10 @@ from agent.runner import build_options  # noqa: E402
 from agent.store import STORE  # noqa: E402
 from agent.tools import ALL_TOOLS, AUTONOMOUS_TOOLS, qualified  # noqa: E402
 
+# This file drives the hooks and gates directly rather than through a scenario run, so its
+# log entries must be distinguishable from live ones. Set before any check runs.
+trace.RUN_SOURCE = "selftest"
+
 PASS, FAIL = "  PASS", "  FAIL"
 results = []
 

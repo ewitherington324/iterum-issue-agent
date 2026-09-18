@@ -10,7 +10,7 @@ import json
 from typing import Literal
 
 from anthropic import AsyncAnthropic
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .config import KNOBS
 from .skills import DECISION_SKILL, TRIAGE_SKILL, fault_reference, load_skill
@@ -52,6 +52,29 @@ class RepairVsReplace(BaseModel):
         default=False,
         description="True when the code came from the fixed-outcome list (e.g. cracked hob "
                     "glass) rather than from weighing the six factors.")
+
+    @model_validator(mode="after")
+    def _contra_required_unless_determinative(self):
+        """A weighed call must argue against itself.
+
+        The requirement was previously only in the `contra_indicators` description, which
+        makes it advisory: an empty list parsed cleanly and was indistinguishable from the
+        model having genuinely found nothing to say. Since the field exists to make an
+        engineer override readable later - did the model already see the reason it was
+        overruled? - an empty list is a silent loss of exactly the signal being collected.
+
+        Determinative calls are exempt by design: there the fault settles the code on its
+        own and there is no counter-argument to make.
+
+        Raising here surfaces as a fallback to the heuristic in assess_repair_vs_replace,
+        with the reason on the reasoning_path event, rather than as a failed run.
+        """
+        if not self.determinative and not self.contra_indicators:
+            raise ValueError(
+                "contra_indicators must be non-empty when determinative is False - a "
+                "weighed recommendation has to state what argues against it."
+            )
+        return self
 
 
 # The two system prompts are the Module 2 skill files, read from skills/ at the repo
