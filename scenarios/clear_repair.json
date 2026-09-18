@@ -1,0 +1,35 @@
+{
+  "id": "clear_repair",
+  "order": 2,
+  "title": "Clear repair",
+  "summary": "Failed drain pump on a 3-year-old machine. Autonomous: recommend, check stock, propose slot, book.",
+  "expected": "Recommendation B (repair) at or above the confidence threshold. Visit booked with NO human gate - can_use_tool is never consulted.",
+  "issue": {
+    "id": "ISS-4402",
+    "appliance_id": "app_002",
+    "resident_id": "res_002",
+    "property_id": "prop_hawkings",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Washer-dryer not draining at end of cycle. Resident says it has been getting worse over two weeks.",
+    "fault_slug_reported": "washer_dryer_not_draining",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 165.0,
+    "estimated_replacement_cost": 549.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "Daniel Okonkwo",
+    "ground_truth": "The drain pump has failed. He has ALREADY cleaned the filter twice - it was clean, and it made no difference. There is a low humming noise at the point in the cycle where it should pump out, then nothing happens. No leak.",
+    "behaviour": "Practical and a bit impatient - he has already done the obvious things and will say so if asked to repeat them. Works from home so most weekdays are fine. Accepts the first sensible appointment offered."
+  }
+}

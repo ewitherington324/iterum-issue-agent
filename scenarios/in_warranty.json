@@ -1,0 +1,35 @@
+{
+  "id": "in_warranty",
+  "order": 4,
+  "title": "In warranty",
+  "summary": "Eight-month-old fridge-freezer. Warranty check exits the automated flow to ops.",
+  "expected": "check_warranty returns in-warranty. Ops notified, resident told the manufacturer handles it, job closed. NO booking, NO quote, NO slot - the warranty hook blocks them.",
+  "issue": {
+    "id": "ISS-4404",
+    "appliance_id": "app_004",
+    "resident_id": "res_004",
+    "property_id": "prop_canalside",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Fridge section not cooling properly. Resident reports milk spoiling within a day.",
+    "fault_slug_reported": "fridge_not_cooling",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 140.0,
+    "estimated_replacement_cost": 599.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "Sam Achterberg",
+    "ground_truth": "The fridge compartment is not getting cold; the freezer is fine. The appliance is under a year old. Nothing obvious is blocking the vents and the door seals look intact.",
+    "behaviour": "Easy-going, answers what is asked. Will check the temperature dial and the vents if asked. Slightly annoyed that a nearly-new appliance has failed."
+  }
+}

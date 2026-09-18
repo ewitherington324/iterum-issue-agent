@@ -1,0 +1,35 @@
+{
+  "id": "resident_rejects",
+  "order": 6,
+  "title": "Resident rejects slots",
+  "summary": "Repair is clear, but the resident turns down three proposed slots. Hands to ops.",
+  "expected": "Three slots proposed and rejected, then send_ops_message hands the thread over. The booking loop must not keep proposing indefinitely.",
+  "issue": {
+    "id": "ISS-4406",
+    "appliance_id": "app_006",
+    "resident_id": "res_006",
+    "property_id": "prop_canalside",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Oven door will not close flush. Resident reports heat escaping and long cooking times.",
+    "fault_slug_reported": "oven_door_issue",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 110.0,
+    "estimated_replacement_cost": 329.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "George Mbeki",
+    "ground_truth": "The oven door hinges have gone, so the door sits proud at the top and will not seal. Nothing the resident can fix.",
+    "behaviour": "Friendly but genuinely hard to schedule - he works shifts and travels. He rejects EVERY appointment slot offered, each time with a different real reason (away that week, night shift, working at the other site). He never accepts. He does not suggest an alternative date unless asked directly, and even then it is vague."
+  }
+}

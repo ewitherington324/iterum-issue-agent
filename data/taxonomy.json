@@ -1,0 +1,234 @@
+{
+  "Washer-Dryer": [
+    {
+      "category": "Not Turning On",
+      "slug": "washer_dryer_not_powering"
+    },
+    {
+      "category": "Not Draining",
+      "slug": "washer_dryer_not_draining"
+    },
+    {
+      "category": "Excessive Noise",
+      "slug": "washer_dryer_noise_during_cycle"
+    },
+    {
+      "category": "Door Issue",
+      "slug": "washer_dryer_door_issue"
+    },
+    {
+      "category": "Not Filling With Water Properly",
+      "slug": "washer_dryer_not_filling"
+    },
+    {
+      "category": "Leaking Water",
+      "slug": "washer_dryer_leak"
+    },
+    {
+      "category": "Not Spinning",
+      "slug": "washer_dryer_not_spinning"
+    },
+    {
+      "category": "Not Drying Properly",
+      "slug": "washer_dryer_not_drying"
+    },
+    {
+      "category": "Display/Error Code",
+      "slug": "washer_dryer_error_code"
+    },
+    {
+      "category": "Bad Smell",
+      "slug": "washer_dryer_smell"
+    },
+    {
+      "category": "Pausing Mid Cycle",
+      "slug": "washer_dryer_pausing_mid_cycle"
+    },
+    {
+      "category": "Other",
+      "slug": "washer_dryer_other"
+    }
+  ],
+  "Oven": [
+    {
+      "category": "Not Heating",
+      "slug": "oven_not_heating"
+    },
+    {
+      "category": "Uneven Cooking",
+      "slug": "oven_uneven_cooking"
+    },
+    {
+      "category": "Door Issue",
+      "slug": "oven_door_issue"
+    },
+    {
+      "category": "Not Turning On",
+      "slug": "oven_not_powering"
+    },
+    {
+      "category": "Controls Not Working",
+      "slug": "oven_controls_faulty"
+    },
+    {
+      "category": "Display/Error Code",
+      "slug": "oven_error_code"
+    },
+    {
+      "category": "Smells or Smoke",
+      "slug": "oven_smoke_or_smell"
+    },
+    {
+      "category": "Noise",
+      "slug": "oven_noise"
+    },
+    {
+      "category": "Other",
+      "slug": "oven_other"
+    }
+  ],
+  "Hob": [
+    {
+      "category": "Not Heating",
+      "slug": "hob_not_heating"
+    },
+    {
+      "category": "Not Turning On",
+      "slug": "hob_not_powering"
+    },
+    {
+      "category": "One Zone Not Working",
+      "slug": "hob_single_zone_fault"
+    },
+    {
+      "category": "Controls Unresponsive",
+      "slug": "hob_controls_faulty"
+    },
+    {
+      "category": "Display/Error Code",
+      "slug": "hob_error_code"
+    },
+    {
+      "category": "Cracked Surface",
+      "slug": "hob_surface_damage"
+    },
+    {
+      "category": "Noise",
+      "slug": "hob_noise"
+    },
+    {
+      "category": "Other",
+      "slug": "hob_other"
+    }
+  ],
+  "Fridge-Freezer": [
+    {
+      "category": "Not Cooling",
+      "slug": "fridge_not_cooling"
+    },
+    {
+      "category": "Over-Freezing",
+      "slug": "fridge_over_freezing"
+    },
+    {
+      "category": "Leaking Water",
+      "slug": "fridge_leaking"
+    },
+    {
+      "category": "Excessive Noise",
+      "slug": "fridge_noise"
+    },
+    {
+      "category": "Light Not Working",
+      "slug": "fridge_light_fault"
+    },
+    {
+      "category": "Door Seal Issue",
+      "slug": "fridge_door_seal"
+    },
+    {
+      "category": "Smells",
+      "slug": "fridge_smell"
+    },
+    {
+      "category": "Display/Error Code",
+      "slug": "fridge_error_code"
+    },
+    {
+      "category": "Other",
+      "slug": "fridge_other"
+    }
+  ],
+  "Hood": [
+    {
+      "category": "Fan Not Working",
+      "slug": "hood_fan_not_working"
+    },
+    {
+      "category": "Lights Not Working",
+      "slug": "hood_lights_not_working"
+    },
+    {
+      "category": "Noise",
+      "slug": "hood_noise"
+    },
+    {
+      "category": "Not Turning On",
+      "slug": "hood_not_powering"
+    },
+    {
+      "category": "Filter Issue",
+      "slug": "hood_filter_issue"
+    },
+    {
+      "category": "Smell",
+      "slug": "hood_smell"
+    },
+    {
+      "category": "Other",
+      "slug": "hood_other"
+    }
+  ],
+  "Dishwasher": [
+    {
+      "category": "Not Draining",
+      "slug": "dishwasher_not_draining"
+    },
+    {
+      "category": "Not Cleaning Properly",
+      "slug": "dishwasher_not_cleaning"
+    },
+    {
+      "category": "Not Turning On",
+      "slug": "dishwasher_not_powering"
+    },
+    {
+      "category": "Leaking",
+      "slug": "dishwasher_leaking"
+    },
+    {
+      "category": "Door Issue",
+      "slug": "dishwasher_door_issue"
+    },
+    {
+      "category": "Error Code",
+      "slug": "dishwasher_error_code"
+    },
+    {
+      "category": "Bad Smell",
+      "slug": "dishwasher_smell"
+    },
+    {
+      "category": "Noise",
+      "slug": "dishwasher_noise"
+    },
+    {
+      "category": "Stopping Mid-Cycle",
+      "slug": "dishwasher_stopping_midcycle"
+    },
+    {
+      "category": "Other",
+      "slug": "dishwasher_other"
+    }
+  ]
+}

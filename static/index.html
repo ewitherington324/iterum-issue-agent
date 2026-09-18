@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Iterum Issue Resolution Agent</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="dot"></span> Iterum Issue Resolution Agent
+    <small>&nbsp;prototype</small></div>
+  <select id="scenario"></select>
+  <button id="run" class="primary">Run scenario</button>
+  <button id="stop">Stop</button>
+  <label class="toggle"><input type="checkbox" id="autoplay" checked> Auto-play resident</label>
+  <div class="spacer"></div>
+  <div class="status">
+    <span id="loopPill" class="pill grey">Idle</span>
+    <span id="iterPill" class="pill grey">&mdash;</span>
+    <span id="costPill" class="pill grey">$0.0000</span>
+  </div>
+</header>
+
+<main>
+  <!-- ---------------- resident ---------------- -->
+  <section class="col">
+    <div class="col-head"><span class="label">Resident &mdash; WhatsApp</span>
+      <span id="residentName" class="pill grey"></span></div>
+    <div class="col-body" id="residentBody">
+      <div id="scenarioCard"></div>
+      <div class="thread" id="thread"></div>
+    </div>
+    <div class="col-foot">
+      <div class="reply-row">
+        <input id="replyText" placeholder="Reply as the resident&hellip;" disabled>
+        <button id="replySend" disabled>Send</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------------- trace ---------------- -->
+  <section class="col">
+    <div class="col-head"><span class="label">Agent trace</span>
+      <span class="note">every tool call, decision and block</span></div>
+    <div class="col-body" id="traceBody">
+      <div class="empty">Pick a scenario and press Run. Each loop, tool call and guardrail
+        appears here as it happens.</div>
+      <div class="trace" id="trace"></div>
+    </div>
+  </section>
+
+  <!-- ---------------- actors / tabs ---------------- -->
+  <section class="col">
+    <div class="col-head">
+      <div class="tabs">
+        <button data-tab="gates" class="on">Gates</button>
+        <button data-tab="record">IQ record</button>
+        <button data-tab="knobs">Knobs</button>
+        <button data-tab="log">Decision log</button>
+      </div>
+    </div>
+    <div class="col-body">
+      <div class="tab-panel on" id="tab-gates"></div>
+      <div class="tab-panel" id="tab-record"></div>
+      <div class="tab-panel" id="tab-knobs"></div>
+      <div class="tab-panel" id="tab-log"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

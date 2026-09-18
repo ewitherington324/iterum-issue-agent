@@ -1,0 +1,35 @@
+{
+  "id": "parts_delayed",
+  "order": 5,
+  "title": "Parts delayed",
+  "summary": "Induction module out of stock. Lead time pushes the earliest viable slot.",
+  "expected": "Recommendation B (repair). check_inventory shows zero stock and a 9-day lead time; send_ops_message requests the order; the proposed slot is on or after today + 9 days.",
+  "issue": {
+    "id": "ISS-4405",
+    "appliance_id": "app_005",
+    "resident_id": "res_005",
+    "property_id": "prop_bmy",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "One hob zone not working. Resident reports the front-left ring does not respond.",
+    "fault_slug_reported": "hob_single_zone_fault",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 185.0,
+    "estimated_replacement_cost": 389.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "Leila Haddad",
+    "ground_truth": "The front-left induction zone does not detect pans at all - no beep, no heat, display shows nothing for that zone. The other three zones work perfectly. She has tried different pans including ones that work on the other zones.",
+    "behaviour": "Clear and helpful, gives precise answers. Has already ruled out the pan being the problem and will say so. Cooks a lot so she is keen to know how long it will take."
+  }
+}

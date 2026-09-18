@@ -1,0 +1,35 @@
+{
+  "id": "likely_replacement",
+  "order": 3,
+  "title": "Likely replacement",
+  "summary": "Nine-year-old oven, no heat. Gated: engineer confirms, then PM approves on cost.",
+  "expected": "Recommendation A or C (replace). book_visit blocks at can_use_tool until the engineer confirms AND the PM approves, because the cost is over the threshold.",
+  "issue": {
+    "id": "ISS-4403",
+    "appliance_id": "app_003",
+    "resident_id": "res_003",
+    "property_id": "prop_equinox",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Oven will not heat up. Resident reports it has been intermittent for a month and has now stopped entirely.",
+    "fault_slug_reported": "oven_not_heating",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 310.0,
+    "estimated_replacement_cost": 419.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "Fiona Wright",
+    "ground_truth": "The oven does not heat at all. The fan runs and the light works, so it has power. Over the past month it had been heating slowly and unevenly before failing completely. There is visible rust and flaking enamel inside the cavity. The grill also stopped working a few months ago and she never reported it.",
+    "behaviour": "Thorough and observant. Volunteers the history if asked open questions. Mentions the grill only if the agent asks whether anything else about the oven has changed. Not willing to do anything involving tools or panels."
+  }
+}

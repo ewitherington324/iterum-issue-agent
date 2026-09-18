@@ -1,0 +1,14 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Secrets
+.env
+
+# Runtime state
+data/store.json
+logs/
+
+# macOS
+.DS_Store

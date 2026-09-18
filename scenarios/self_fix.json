@@ -1,0 +1,35 @@
+{
+  "id": "self_fix",
+  "order": 1,
+  "title": "Clean self-fix",
+  "summary": "Blocked filter. Triage resolves it with no visit and closes the job.",
+  "expected": "close_job called with a self-resolved resolution. No visit booked, no engineer, no PM.",
+  "issue": {
+    "id": "ISS-4401",
+    "appliance_id": "app_001",
+    "resident_id": "res_001",
+    "property_id": "prop_bmy",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Resident reports dishwasher is not draining - water sitting in the bottom after every cycle.",
+    "fault_slug_reported": "dishwasher_not_draining",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 95.0,
+    "estimated_replacement_cost": 429.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "Aisha Bello",
+    "ground_truth": "The filter at the bottom of the dishwasher is clogged with debris. She has never cleaned it and did not know it came out. Once she twists it out, rinses it and refits it, the machine drains normally.",
+    "behaviour": "Cooperative, replies promptly, willing to try things. Not technical - needs to be told where the filter is. Reports honestly what she sees. If asked to run a short cycle after cleaning the filter, she does and it works."
+  }
+}
