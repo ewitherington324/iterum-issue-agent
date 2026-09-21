@@ -187,15 +187,13 @@ This maps onto the `RepairVsReplace` model in `agent/reasoning.py`. The first fo
 
 Note what is *not* here. Cost bands, parts and the engineer brief are already assembled by the calling code from the inventory and appliance records — they are not this call's job, and generating them here would mean the model inventing numbers the system already knows.
 
-`contra_indicators` is not decoration. Forcing an argument against your own conclusion improves calibration, and when an engineer overrides the recommendation, the override log is far more useful if it shows whether the model had already seen the reason.
-
 ## Edge cases
 
 **Install date missing.** Common in practice, since appliances are often inherited with a building. Estimate from model and serial where possible and say you estimated. If you cannot, treat age as unknown, cap confidence at 0.6, and name it in `evidence_gaps` — do not silently assume a mid-life appliance.
 
 **No comparable jobs.** Expected early on. Proceed on the heuristics and say the comparables were absent. Do not manufacture false precision from a single loosely similar job.
 
-**Integrated or built-in appliance.** Replacement cost is materially higher — the unit, the installation, sometimes carcass or door-furniture modification — and lead times are longer. This shifts the economics toward repair. Always check whether the appliance is integrated before applying the 50% rule.
+**Integrated or built-in appliance.** Replacement cost is materially higher — the unit, the installation, sometimes carcass or door-furniture modification — and lead times are longer. This shifts the economics toward repair. Always check whether the appliance is integrated before applying the 70% ratio.
 
 **Discontinued model or unavailable part.** Strong replace signal regardless of fault class. Flag the lead time explicitly, because it drives the earliest viable slot downstream.
 
