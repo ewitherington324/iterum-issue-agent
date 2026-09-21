@@ -380,6 +380,14 @@ def environment_failure(rec, summary) -> str | None:
 async def run_one(sid: str, verbose: bool) -> tuple[int, int, float, str | None]:
     print(f"\n{B}{'─' * 78}{OFF}")
     print(f"{B}{sid}{OFF}")
+
+    # Clear the bus BEFORE the Recorder subscribes. BUS.subscribe() replays history to
+    # every new subscriber, and run_scenario does not reset until after this Recorder is
+    # already listening - so without this line each scenario starts holding the previous
+    # scenario's entire event stream. That silently contaminated every check reading
+    # `rec` in a multi-scenario sweep: the slots and gates of the scenario before were
+    # counted as this one's, and the first scenario was the only clean one.
+    BUS.reset()
     rec = Recorder(sid, verbose)
     listener = asyncio.create_task(rec.listen())
     await asyncio.sleep(0.1)
