@@ -1,0 +1,35 @@
+{
+  "id": "cracked_hob",
+  "order": 4,
+  "title": "Cracked hob (determinative)",
+  "summary": "Cracked induction surface on a 4-year-old hob. Fixed-outcome fault: code A regardless of age or cost ratio. No photo obtainable, so confidence is capped.",
+  "expected": "assess_repair_vs_replace returns code A with determinative true. Age (4.2y, inside the 7-year line) and cost ratio (42%, well inside the 70% boundary) both point to repair and must not move the code. No photo can be obtained, so confidence is 0.6 or below with the ambiguity named in evidence_gaps. Replacement still routes through engineer confirmation before booking; at GBP 389 it is under the PM threshold, so no PM approval is sought.",
+  "issue": {
+    "id": "ISS-4408",
+    "appliance_id": "app_005",
+    "resident_id": "res_005",
+    "property_id": "prop_bmy",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Resident reports a crack in the hob surface - a dark line across the front-right zone that appeared suddenly. Hob has not been used since.",
+    "fault_slug_reported": "hob_surface_damage",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 165.0,
+    "estimated_replacement_cost": 389.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "Leila Haddad",
+    "ground_truth": "A pan of cold water boiled over onto the hot front-right zone two days ago and there was a sharp cracking noise. There is now a thin dark line roughly 10cm long across that zone. It is a genuine crack, though she cannot be certain of that herself - she cannot tell whether her fingernail catches in it or whether she is feeling the edge of a scorch mark. She has not used the hob since and has switched it off at the wall.",
+    "behaviour": "Careful and cooperative. Describes what she can see clearly and accurately. Will say plainly that she cannot tell a crack from a heat mark when asked. IMPORTANT: she cannot send a photograph under any circumstances - she uses a basic handset with no camera and has no other device. If asked for a photo she says so directly and offers to describe it instead. She will not invent certainty she does not have."
+  }
+}

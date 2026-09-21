@@ -66,7 +66,9 @@ async def main():
     # ---------------------------------------------------------------- scenarios load
     section("Scenarios")
     ids = sorted(p.stem for p in Path("scenarios").glob("*.json"))
-    check("all seven scenarios present", len(ids) == 7, str(ids))
+    check("all eight scenarios present", len(ids) == 8, str(ids))
+    orders = [json.loads(Path(f"scenarios/{i}.json").read_text())["order"] for i in ids]
+    check("scenario orders are unique", len(set(orders)) == len(orders), str(sorted(orders)))
     for sid in ids:
         try:
             STORE.load_scenario(sid)

@@ -1,6 +1,6 @@
 {
   "id": "resident_rejects",
-  "order": 6,
+  "order": 7,
   "title": "Resident rejects slots",
   "summary": "Repair is clear, but the resident turns down three proposed slots. Hands to ops.",
   "expected": "Three slots proposed and rejected, then send_ops_message hands the thread over. The booking loop must not keep proposing indefinitely.",

@@ -14,6 +14,7 @@ Costs real money - roughly $0.15 to $0.60 per scenario.
 """
 
 import asyncio
+import json
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -42,6 +43,11 @@ GATE_SCRIPT = {
     "likely_replacement": {
         "engineer": ("confirm", "Agreed - at that age with corrosion it is not worth repairing."),
         "pm": ("approve", "Approved, go ahead and replace."),
+    },
+    "cracked_hob": {
+        "engineer": ("confirm", "Confirmed on site - it is a crack, not a heat mark. Hob needs replacing."),
+        # No PM entry: at GBP 389 this sits under the threshold and the PM gate
+        # should never open. If it does, that is the finding.
     },
 }
 DEFAULT_SCRIPT = {"engineer": ("confirm", ""), "pm": ("approve", "")}
@@ -129,6 +135,23 @@ def _no_triage_after_danger(rec: "Recorder") -> bool:
     return not [e for e in rec.of("tool_call")
                 if e["tool"] == "get_triage_steps" and e["seq"] > after]
 
+def _assessment(rec: "Recorder") -> dict:
+    """The raw assess_repair_vs_replace payload, from the event stream.
+
+    `issue["recommendation"]` and `issue["confidence"]` carry only what
+    submit_recommendation restated, and the two drifted from the assessment on every
+    scenario measured so far. `determinative`, `evidence_gaps` and the inputs the call
+    actually weighed are not written to the issue at all, so they can only be read here.
+    """
+    for e in reversed(rec.of("tool_result")):
+        if e.get("tool") == "assess_repair_vs_replace":
+            try:
+                return json.loads(e["result"])
+            except (ValueError, TypeError, KeyError):
+                return {}
+    return {}
+
+
 def _approvals_precede_booking(rec: "Recorder") -> bool:
     """PRD 3.4: booking waits on both. Check the ordering in the event stream rather than
     trusting that it happened to work out."""
@@ -206,6 +229,56 @@ def expectations(sid: str, rec: Recorder, summary: dict) -> list[tuple[str, bool
              "booking was allowed before one of the approvals came back"),
             ("a replacement visit exists",
              any("replac" in v["type"].lower() for v in visits), str(visits)),
+        ]
+
+    elif sid == "cracked_hob":
+        a = _assessment(rec)
+        code, conf = a.get("code"), a.get("confidence")
+        det = a.get("determinative")
+        inp = a.get("inputs") or {}
+        age, ratio = inp.get("age_years"), inp.get("cost_ratio")
+        gaps = a.get("evidence_gaps") or []
+        pm_opened = [e for e in rec.of("gate_opened") if e.get("gate") == "pm"]
+        ceiling = 0.6
+        checks += [
+            ("the assessment returned code A", code == "A", f"code={code!r}"),
+            ("the call was flagged determinative", det is True, f"determinative={det!r}"),
+
+            # The point of the scenario. Both weighed signals argue for repair; the
+            # fixed-outcome rule has to beat them. If the code tracks age or ratio here,
+            # the determinative list is not doing anything.
+            (f"age and cost ratio both point to repair, yet the code is still A "
+             f"(age={age}y vs the 7-year line, ratio={ratio} vs 0.70)",
+             code == "A" and age is not None and age < 7
+             and ratio is not None and ratio < 0.70,
+             f"age={age} ratio={ratio} code={code!r}"),
+
+            # Evidence ladder, lower rung: no photo is obtainable in this scenario, so
+            # the skill caps confidence rather than letting a clear verbal account
+            # stand in for confirmation.
+            (f"confidence is {ceiling} or below - no photo was obtainable",
+             isinstance(conf, (int, float)) and conf <= ceiling, f"confidence={conf!r}"),
+            ("the missing photo is named in evidence_gaps",
+             any("photo" in str(g).lower() for g in gaps), str(gaps)),
+
+            # Routing is unchanged by determinative: high-certainty replace still buys a
+            # better-prepared engineer, not less oversight.
+            ("the engineer was asked to confirm", "send_engineer_message" in tools,
+             "not asked"),
+            ("the gate evaluated the booking on the replacement path",
+             any(e.get("path") == "replacement" for e in gate_allows + gate_denies),
+             "the gate never saw a replacement booking"),
+            ("the engineer confirmed BEFORE booking was allowed",
+             _approvals_precede_booking(rec),
+             "booking was allowed before the engineer confirmed"),
+            ("a replacement visit exists",
+             any("replac" in v["type"].lower() for v in visits), str(visits)),
+
+            # Determinative must not over-escalate either: GBP 389 is under the
+            # GBP 400 threshold, so the PM should never be involved.
+            (f"no PM gate opened - GBP {issue['estimated_replacement_cost']:.0f} is under "
+             f"the GBP {KNOBS.pm_cost_threshold_gbp:.0f} threshold",
+             not pm_opened, f"{len(pm_opened)} PM gate(s) opened"),
         ]
 
     elif sid == "in_warranty":

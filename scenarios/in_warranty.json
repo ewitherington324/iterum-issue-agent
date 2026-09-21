@@ -1,6 +1,6 @@
 {
   "id": "in_warranty",
-  "order": 4,
+  "order": 5,
   "title": "In warranty",
   "summary": "Eight-month-old fridge-freezer. Warranty check exits the automated flow to ops.",
   "expected": "check_warranty returns in-warranty. Ops notified, resident told the manufacturer handles it, job closed. NO booking, NO quote, NO slot - the warranty hook blocks them.",

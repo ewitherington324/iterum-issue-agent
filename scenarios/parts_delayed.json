@@ -1,6 +1,6 @@
 {
   "id": "parts_delayed",
-  "order": 5,
+  "order": 6,
   "title": "Parts delayed",
   "summary": "Induction module out of stock. Lead time pushes the earliest viable slot.",
   "expected": "Recommendation B (repair). check_inventory shows zero stock and a 9-day lead time; send_ops_message requests the order; the proposed slot is on or after today + 9 days.",
