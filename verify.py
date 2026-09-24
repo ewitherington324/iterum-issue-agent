@@ -1,6 +1,6 @@
 """Runs every scenario end to end and checks what actually happened.
 
-This is the verification step from the build plan: for each of the seven scenarios,
+This is the verification step from the build plan: for each of the eight scenarios,
 confirm the terminal state is the one the PRD says it should be. It plays the human
 actors from a script so the whole sweep runs unattended, which is what makes it useful
 before a demo - you want to know the replacement gate still holds before you show it to

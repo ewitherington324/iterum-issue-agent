@@ -1,10 +1,10 @@
 # Iterum Issue Resolution Agent — vision prototype
 
-A working prototype of the agentic system described in `PRD_Iterum_Issue_Resolution_Agent.md`:
+A working prototype of the agentic system described in [`docs/PRD.md`](docs/PRD.md):
 it takes a resident from a reported appliance fault to one of three outcomes — resolved by
 guided self-troubleshooting, a booked engineer visit, or escalated to Iterum Ops.
 
-Built for Module 1 of an AI course. It is **not** connected to Iterum IQ, Airtable, WhatsApp,
+Built across the modules of an AI course (see *Project history* below). It is **not** connected to Iterum IQ, Airtable, WhatsApp,
 Mailgun or anything else real. Every external system is mocked. The point is to make the
 vision legible, not to ship it.
 
@@ -38,8 +38,8 @@ Python 3.10+. The first run creates a virtualenv and installs dependencies. A fu
 costs roughly $0.15–$0.60 in API usage.
 
 ```bash
-.venv/bin/python selftest.py    # 42 checks, no API key needed
-.venv/bin/python verify.py      # runs all 7 scenarios and checks the outcomes
+.venv/bin/python selftest.py    # 44 checks, no API key needed
+.venv/bin/python verify.py      # runs all 8 scenarios and checks the outcomes
 ```
 
 ---
@@ -70,22 +70,31 @@ why: *"Engineer confirmed; PM approved GBP 419 (over the GBP 400 threshold)."*
 > clicking **Override** on the engineer card instead — the booking is refused, and the
 > refusal explains that the engineer's assessment takes precedence.
 
-**4 · In warranty** — the branch that leaves the flow.
+**4 · Cracked hob** — a fixed-outcome fault (added in Module 2).
+A four-year-old induction hob whose repair would cost 42% of a replacement — age and cost
+both argue for repair. But the surface is cracked, which the repair-vs-replace skill treats as
+a replacement at any age. The recommendation comes back as code A, marked `determinative`,
+with confidence capped at 0.6 because no photo can be supplied. It still goes through engineer
+confirmation; at £389 it is under the PM threshold, so no PM approval is sought.
+> *Talking point:* some rules settle the answer on their own; the skill says which ones, and
+> the trace shows when one fired.
+
+**5 · In warranty** — the branch that leaves the flow.
 The moment `check_warranty` returns in-warranty, a red guardrail fires in the trace and four
 tools are hard-blocked for the rest of the thread. The agent notifies ops, tells the resident
 the manufacturer is handling it, and closes its loop.
 > *Talking point:* PRD §5.2 says the agent does not book, quote or schedule these. It now
 > *cannot*, rather than being asked not to.
 
-**5 · Parts delayed** — deterministic scheduling.
+**6 · Parts delayed** — deterministic scheduling.
 Induction module out of stock, nine-day lead time. Ops is asked to order it and the proposed
 slot moves out accordingly.
 
-**6 · Resident rejects slots** — the loop that has to give up.
+**7 · Resident rejects slots** — the loop that has to give up.
 Three slots proposed and refused, then the scheduling tool itself refuses to propose a fourth
 and tells the agent to hand the thread to ops.
 
-**7 · Guardrail — apparent emergency**
+**8 · Guardrail — apparent emergency**
 The property manager logged "hob showing an error code". The resident's first message
 describes a bang, a burning smell and a spreading scorch mark. The agent must not
 troubleshoot this.
@@ -184,3 +193,16 @@ selection here is the deterministic v1 rule from §5.1.
 visit for the same afternoon. The rule is implemented exactly as written, because changing the
 spec silently would hide the finding. A real v1 probably needs a minimum notice period, or the
 engineer's actual day capacity, neither of which the PRD currently defines.
+
+---
+
+## Project history
+
+| Module | What it added | Where to look |
+|---|---|---|
+| 1 — Design & prototype | The PRD and this prototype | `docs/PRD.md`, this README |
+| 2 — Skills | Three skills (troubleshooting, repair vs. replace, escalation) and ten appliance fault references, loaded by `agent/skills.py` | `skills/`, `docs/module2/` |
+| 3 — Subagent | *In progress:* the repair-vs-replace assessment as a subagent | — |
+
+For a one-page map of what exists and how the pieces connect, start with
+[`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md).

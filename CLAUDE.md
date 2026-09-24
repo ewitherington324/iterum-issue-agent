@@ -1,19 +1,19 @@
 # Iterum Issue Resolution Agent — working notes
 
-Prototype of the agentic system in `~/Downloads/PRD_Iterum_Issue_Resolution_Agent.md.pdf`,
+Prototype of the agentic system in `docs/PRD.md`,
 built for an AI course. Its job is to make
 the vision legible to instructors and eventually to integrate with Iterum IQ. Currently every external
 system (IQ, Airtable, WhatsApp, Mailgun) is mocked.
 
-Read `README.md` first for the demo script and the architecture rationale. This file is the
+Read `docs/PROJECT_MAP.md` for the one-page orientation, then `README.md` for the demo script and the architecture rationale. This file is the
 short version plus the things that will bite you.
 
 ## Commands
 
 ```bash
 ./run.sh                              # http://localhost:8000
-.venv/bin/python selftest.py          # 42 checks, no API key, ~1s — use this constantly
-.venv/bin/python verify.py            # all 7 scenarios against the real model (~$3)
+.venv/bin/python selftest.py          # 44 checks, no API key, ~1s — use this constantly
+.venv/bin/python verify.py            # all 8 scenarios against the real model (~$3)
 .venv/bin/python verify.py self_fix   # one scenario, verbose trace (~$0.15–0.70)
 ```
 
@@ -83,8 +83,10 @@ agent/skills.py     loads skills/ — system prompts for the two reasoning calls
 skills/             the Module 2 skill files: three SKILL.md, plus ten appliance fault
                     references under iterum-triage-steps/references/
 server.py           FastAPI: SSE stream + the human-actor endpoints
+docs/               PRD, project map, and docs/module2/ (submitted write-up, evidence,
+                    pre-skills baseline prompts)
 static/             the three-pane UI (vanilla JS, roadmap-green palette)
-scenarios/*.json    the 7 test cases; "order" drives both the UI dropdown and verify.py
+scenarios/*.json    the 8 test cases; "order" drives both the UI dropdown and verify.py
 ```
 
 **Generated — don't hand-edit:** `data/store.json` (rebuilt per scenario run),
