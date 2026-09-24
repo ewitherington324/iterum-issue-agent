@@ -129,6 +129,126 @@ function plain(cls, text) {
   scrollDown("traceBody");
 }
 
+/* ------------------------------------------------ skill output (Module 2) ---------
+   The three skills feed the two reasoning calls in agent/reasoning.py, but until now
+   nothing they distinctively produce reached the UI - it arrived as an undifferentiated
+   JSON dump in the trace, alongside every other tool result. These renderers pull out
+   the parts that ARE the skills' contribution, so the before/after is visible rather
+   than asserted:
+
+     - decision skill  -> contra_indicators, evidence_gaps, determinative
+     - triage skill    -> fault_slug and whether its reference section matched
+
+   Both fall back quietly: on the rules-based path there are no contra_indicators and
+   no skill name, and the card says so, which is the A/B in one glance. */
+let skillOut = { assessment: null, triage: null };
+
+const CODE_PILL = { A: "amber", B: "green", C: "amber", D: "blue" };
+
+function parseResult(raw) {
+  try { return typeof raw === "string" ? JSON.parse(raw) : raw; } catch { return null; }
+}
+
+function listBlock(labelText, items, extraCls, ordered) {
+  const wrap = el("div", "skill-block");
+  wrap.appendChild(el("div", "label", labelText));
+  const list = el(ordered ? "ol" : "ul", "skill-list" + (extraCls ? " " + extraCls : ""));
+  (items || []).forEach((t) => list.appendChild(el("li", null, String(t))));
+  wrap.appendChild(list);
+  return wrap;
+}
+
+function textBlock(labelText, body, extraCls) {
+  const wrap = el("div", "skill-block" + (extraCls ? " " + extraCls : ""));
+  wrap.appendChild(el("div", "label", labelText));
+  wrap.appendChild(el("div", "note", body));
+  return wrap;
+}
+
+function assessmentCard(a) {
+  const card = el("div", "card skill");
+
+  const h = el("h4");
+  h.appendChild(el("span", `pill ${CODE_PILL[a.code] || "grey"}`, `Code ${a.code}`));
+  h.appendChild(el("span", null, a.code_meaning || "recommendation"));
+  card.appendChild(h);
+
+  const meta = el("div", "skill-meta");
+  const conf = Number(a.confidence);
+  const thr = Number(a.confidence_threshold);
+  meta.appendChild(el("span", `pill ${a.meets_threshold ? "green" : "amber"}`,
+    `confidence ${isFinite(conf) ? conf.toFixed(2) : "?"}`));
+  if (isFinite(thr)) {
+    meta.appendChild(el("span", "note", a.meets_threshold
+      ? `meets the ${thr.toFixed(2)} threshold`
+      : `BELOW the ${thr.toFixed(2)} threshold`));
+  }
+  card.appendChild(meta);
+
+  // The marker that has to read at a glance: this code did not come from weighing.
+  if (a.determinative) {
+    const d = el("div", "determ");
+    d.appendChild(el("span", "pill solid-purple", "DETERMINATIVE"));
+    d.appendChild(el("span", null,
+      "Fixed-outcome fault \u2014 the fault class sets the code on its own. " +
+      "The six factors, the 7-year line and the 70% ratio do not apply."));
+    card.appendChild(d);
+  }
+
+  if (a.rationale) card.appendChild(textBlock("Rationale", a.rationale));
+  if (a.key_factors && a.key_factors.length)
+    card.appendChild(listBlock("Key factors", a.key_factors));
+
+  // The headline addition. Empty is now a validation error on a weighed call, so an
+  // absent list here means the rules-based path, not a silent miss.
+  if (a.contra_indicators && a.contra_indicators.length) {
+    card.appendChild(listBlock("Contra-indicators \u2014 what argues against this code",
+      a.contra_indicators, "contra"));
+  }
+  if (a.evidence_gaps && a.evidence_gaps.length)
+    card.appendChild(listBlock("Evidence gaps", a.evidence_gaps, "gaps"));
+
+  const src = el("div", "skill-src");
+  src.appendChild(el("span", "pill grey", a.skill || "rules-based heuristic"));
+  src.appendChild(el("span", null, a.source === "llm_reasoning_call"
+    ? "reasoning call" : "fallback path \u2014 no skill in context"));
+  if (a.confidence_basis) src.appendChild(el("span", "basis", a.confidence_basis));
+  card.appendChild(src);
+
+  return card;
+}
+
+function triageNodes(t) {
+  const nodes = [];
+
+  const row = el("div", "skill-meta");
+  row.appendChild(el("span", "pill purple", t.fault_slug || "no fault_slug"));
+  row.appendChild(el("span", `pill ${t.reference_matched ? "green" : "red"}`,
+    t.reference_matched ? "reference matched" : "NO reference"));
+  nodes.push(row);
+
+  nodes.push(el("div", "note", t.reference_matched
+    ? "Steps drawn from the documented fault pattern for this slug under " +
+      "skills/iterum-triage-steps/references/ \u2014 not improvised."
+    : "No reference section for this appliance type. The skill instructs the model not " +
+      "to improvise beyond universally safe checks and to route to an engineer."));
+
+  if (t.steps && t.steps.length)
+    nodes.push(listBlock("Resident-safe steps", t.steps, null, true));
+  if (t.diagnostic_question)
+    nodes.push(textBlock("Diagnostic question", t.diagnostic_question));
+  if (t.safety_note)
+    nodes.push(textBlock("Safety", t.safety_note, "safety"));
+
+  const src = el("div", "skill-src");
+  src.appendChild(el("span", "pill grey", t.skill || "rules-based lookup"));
+  src.appendChild(el("span", null, t.source === "llm_reasoning_call"
+    ? "reasoning call" : "fallback path"));
+  nodes.push(src);
+
+  return nodes;
+}
+
 /* ------------------------------------------------------------------ gates pane */
 let gatesHtml = { gate: null, ops: [], visits: [], closed: null, guardrails: [] };
 
@@ -179,6 +299,10 @@ function renderGates() {
     card.appendChild(note); card.appendChild(row);
     p.appendChild(card);
   }
+
+  // The assessment that the gates are deciding on. Placed directly under an open gate
+  // so the engineer is looking at the contra-indicators while confirming or overriding.
+  if (skillOut.assessment) p.appendChild(assessmentCard(skillOut.assessment));
 
   // resolved decisions
   const decided = [];
@@ -388,6 +512,7 @@ function handle(e) {
     case "reset":
       $("thread").innerHTML = ""; $("trace").innerHTML = "";
       gatesHtml = { gate: null, ops: [], visits: [], closed: null, guardrails: [] };
+      skillOut = { assessment: null, triage: null };
       state = {}; renderGates();
       break;
 
@@ -429,9 +554,21 @@ function handle(e) {
       }
       break;
 
-    case "tool_result":
+    case "tool_result": {
+      const parsed = parseResult(e.result);
+      if (e.tool === "assess_repair_vs_replace" && parsed && parsed.code) {
+        skillOut.assessment = parsed;
+        renderGates();
+      }
+      if (e.tool === "get_triage_steps" && parsed && (parsed.steps || parsed.fault_slug)) {
+        skillOut.triage = parsed;
+        traceCard("skill", "purple", "triage skill", e.tool, triageNodes(parsed), true);
+      }
+      // The raw payload still gets its own collapsed card - the readable view is an
+      // addition, not a replacement, so nothing is hidden from the trace.
       traceCard("tool", "grey", "result", e.tool, [pre(e.result)], false);
       break;
+    }
 
     case "reasoning_path":
       traceCard("tool", e.path === "llm" ? "blue" : "amber",

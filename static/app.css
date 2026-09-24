@@ -171,3 +171,41 @@ main { flex:1; display:grid; grid-template-columns: 1fr 1.25fr 1fr; min-height:0
 .log-row { font-family:var(--mono); font-size:10.5px; padding:5px 7px; border-bottom:0.5px solid var(--paper-2); }
 .log-row b { color:var(--green-900); }
 .empty { color:var(--ink-muted); font-size:12px; padding:14px 2px; }
+
+/* ---------- skill output (Module 2) ----------
+   The three skills feed the two reasoning calls, but until now their distinctive output
+   only reached the UI as a raw JSON dump in the trace. These styles surface the parts
+   that are actually the skills' contribution: the decision skill's contra_indicators,
+   evidence_gaps and determinative flag, and the triage skill's fault-pattern lookup.
+   Purple throughout, matching the decision loop's band colour. */
+.card.skill { border-left:2.5px solid var(--purple-600); }
+.evt.skill  { border-left:2.5px solid var(--purple-600); background:var(--purple-050); }
+
+.skill-meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin:3px 0 7px; }
+.skill-block { margin-top:10px; }
+.skill-block > .label { margin-bottom:4px; }
+.skill-block.safety { border-left:2px solid var(--red-200); padding-left:9px; }
+
+.skill-list { margin:0; padding-left:18px; font-size:11.5px; color:var(--ink-soft); }
+.skill-list li { margin:4px 0; }
+.skill-list.contra li { color:var(--amber-900); }
+.skill-list.gaps li   { color:var(--ink-muted); }
+
+/* The determinative marker is the one thing that must read at a glance on a recording. */
+.determ {
+  display:flex; align-items:flex-start; gap:9px; margin:8px 0 2px; padding:9px 10px;
+  background:var(--purple-050); border:0.5px solid var(--purple-200);
+  border-radius:var(--r-sm); font-size:11.5px; color:var(--purple-900); line-height:1.45;
+}
+.pill.solid-purple {
+  background:var(--purple-600); color:#fff; border-color:var(--purple-600);
+  font-weight:600; letter-spacing:0.06em;
+}
+
+.skill-src {
+  margin-top:11px; padding-top:8px; border-top:0.5px solid var(--paper-2);
+  display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+  font-size:10.5px; color:var(--ink-muted);
+}
+/* Long provenance text gets its own row rather than being squeezed into a column. */
+.skill-src .basis { flex:1 1 100%; margin-top:2px; }
