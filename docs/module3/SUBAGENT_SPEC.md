@@ -54,8 +54,9 @@ on evidence about the appliance and the fault, that the rest of the system canno
 - Look up the appliance and comparable past jobs.
 - Weigh the evidence using the repair-vs-replace skill.
 - Say plainly what evidence was missing and how that limited its confidence.
-- On re-invocation, decide whether the new information is about the appliance or fault. If it
-  isn't, return "no change" with a reason rather than re-assessing.
+- On re-invocation, decide whether the new information could change the repair-vs-replace
+  judgement for this fault. If it couldn't, return "no change" with a reason rather than
+  re-assessing.
 
 It does **not** talk to the resident, contact anyone, book anything or change any record.
 
@@ -116,8 +117,23 @@ and adds the new quotes, marked as new, so earlier evidence cannot be restated o
 subagent is not shown its previous code or confidence; it judges relevance, then (if relevant)
 assesses the combined evidence afresh.
 
-The filter for what counts as fault information is the same in both cases: about the appliance
-or the fault goes in; scheduling preferences, logistics and unrelated grievances stay out.
+**Two relevance standards, deliberately different.**
+
+- **What the main agent passes on (broad):** anything about the appliance or the fault goes in;
+  scheduling preferences, logistics and unrelated grievances stay out. The same filter applies to
+  a first assessment and a re-invocation. The main agent is not asked to judge what matters to
+  the assessment - that would bring its own view of the outcome back in.
+- **Whether the subagent re-assesses (narrow):** could this new information change the
+  repair-vs-replace judgement for this fault? If not, it returns `no_change`, even when the
+  information is about the appliance.
+
+The gap between the two is intended. In the first `irrelevant_info` run (step 5), a long-standing
+stiff soap drawer on a washer-dryer with a failed drain pump was about the appliance, so it was
+rightly passed on - but the subagent, applying the same broad test, re-assessed instead of
+answering `no_change`. It kept code B but produced a new assessment (confidence 0.85 → 0.78) that
+replaced the submitted one on evidence that could not bear on the fault. A re-assessment is not
+free: it supersedes the submitted recommendation, must be submitted before booking continues, and
+clears any engineer or PM approval given on the one it replaces.
 
 ## Outputs
 
@@ -187,11 +203,12 @@ twice per issue. A third attempt goes to ops instead, with the assessment histor
 - **Window.** Re-invocation is allowed in the decision and booking loops until a visit is booked.
   A plain second call to `assess_repair_vs_replace` is refused once an assessment exists, so the
   cap cannot be bypassed.
-- **Relevance.** The subagent decides, not code. If the new information is not about the
-  appliance or fault, it exits with `submit_no_change` and a reason; the log records
+- **Relevance.** The subagent decides, not code, using the narrow standard above: if the new
+  information could not change the repair-vs-replace judgement for this fault, it exits with
+  `submit_no_change` and a reason; the log records
   `status: no_change`, carrying forward the previous code and confidence for reference. A
   `no_change` cannot be submitted, so the recommendation already submitted stands. If it is
-  relevant, it re-assesses and exits with `submit_assessment` as usual.
+  could, it re-assesses and exits with `submit_assessment` as usual.
 - **What counts.** Every re-invocation that reaches the subagent counts towards the cap, whether
   it ends `assessed`, `no_change` or `reassessment_failed`. Input rejected by the filter (not verbatim, a verdict, a
   stale previous ID) never reached the subagent and does not count.

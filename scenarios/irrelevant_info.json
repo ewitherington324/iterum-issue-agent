@@ -2,7 +2,7 @@
   "id": "irrelevant_info",
   "order": 10,
   "title": "Irrelevant information mid-booking",
-  "summary": "The clear_repair washer-dryer again. When offered an appointment, the resident mentions a long-standing stiff detergent drawer. It is about the appliance but not the fault: the subagent should return no_change.",
+  "summary": "The clear_repair washer-dryer again. When offered an appointment, the resident mentions a long-standing stiff detergent drawer. It is about the appliance, so the main agent passes it on, but it could not change the repair-vs-replace judgement for a failed drain pump: the subagent should return no_change.",
   "expected": "First assessment B, as in clear_repair. The resident's remark about the detergent drawer is passed to reassess_repair_vs_replace, and the subagent exits with submit_no_change (status no_change). Nothing new is submitted, no approvals are cleared, and the visit is booked on the repair path against the original assessment. If the main agent filters the remark out itself and never re-invokes, the subagent's relevance check is recorded as NOT EXERCISED rather than failed.",
   "issue": {
     "id": "ISS-4410",

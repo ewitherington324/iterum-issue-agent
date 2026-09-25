@@ -13,7 +13,7 @@ Module 3 work follows docs/module3/SUBAGENT_SPEC.md. If the code and the spec di
 
 ```bash
 ./run.sh                              # http://localhost:8000
-.venv/bin/python selftest.py          # 198 checks, no API key, ~1s — use this constantly
+.venv/bin/python selftest.py          # 199 checks, no API key, ~1s — use this constantly
 .venv/bin/python verify.py            # all 13 scenarios against the real model (~$8)
 .venv/bin/python verify.py --new --runs 2 --results NAME   # repeat runs; table in docs/module3/results/
 .venv/bin/python verify.py self_fix   # one scenario, verbose trace (~$0.15–0.70)

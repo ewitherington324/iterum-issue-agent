@@ -38,7 +38,7 @@ Python 3.10+. The first run creates a virtualenv and installs dependencies. A fu
 costs roughly $0.15–$0.60 in API usage.
 
 ```bash
-.venv/bin/python selftest.py    # 198 checks, no API key needed
+.venv/bin/python selftest.py    # 199 checks, no API key needed
 .venv/bin/python verify.py      # runs all 13 scenarios and checks the outcomes
 ```
 

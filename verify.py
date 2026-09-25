@@ -491,12 +491,12 @@ def expectations(sid: str, rec: Recorder, summary: dict) -> list[tuple[str, bool
         checks.append(("first assessment is B, as in clear_repair", first.get("code") == "B",
                        str(first.get("code"))))
         if not reinv:
-            checks.append(("the subagent judged the remark not about the fault (no_change)",
+            checks.append(("the subagent judged the remark could not change the judgement (no_change)",
                            None, "the main agent never re-invoked the subagent - it filtered "
                                  "the remark out itself, so the relevance check was not "
                                  "exercised"))
         else:
-            checks.append(("the subagent judged the remark not about the fault (no_change)",
+            checks.append(("the subagent judged the remark could not change the judgement (no_change)",
                            all(a["status"] == "no_change" for a in reinv),
                            str([a["status"] for a in reinv])))
         checks += [

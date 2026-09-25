@@ -280,8 +280,8 @@ def _with_record_fields(result: dict, brief: dict) -> dict:
       "since the latest assessment - a new symptom, something they saw, heard or tried. "
       "Pass the latest assessment_id and the resident's new words, copied exactly. The "
       "earlier evidence is carried over by the system; do not repeat it. The assessor "
-      "first decides whether the new information is about the fault: if not, it returns "
-      "'no_change' and the earlier assessment stands. Not for scheduling, complaints, or "
+      "first decides whether the new information could change its judgement: if not, it "
+      "returns 'no_change' and the earlier assessment stands. Not for scheduling, complaints, or "
       "because you would prefer a different answer. At most two per issue; a third goes "
       "to ops with the assessment history.",
       subagent.REINVOKE_SCHEMA)
@@ -355,11 +355,11 @@ async def reassess_repair_vs_replace(args):
     elif "no_change_reason" in result and "code" not in result:
         entry = subagent.no_change(previous, result["no_change_reason"])
         entry["brief"] = brief
-        entry["relevance_check"] = "not about the appliance or fault (subagent)"
+        entry["relevance_check"] = "could not change the judgement for this fault (subagent)"
         status = "no_change"
     else:
         entry = result
-        entry["relevance_check"] = "about the appliance or fault (subagent re-assessed)"
+        entry["relevance_check"] = "could change the judgement for this fault (subagent re-assessed)"
         status = "assessed"
     entry["reassesses"] = previous["assessment_id"]
     assessment = assessments.record(issue, appliance["id"], entry, status=status)
@@ -372,7 +372,8 @@ async def reassess_repair_vs_replace(args):
               f"Submit {assessments.latest_assessed(issue)['assessment_id']} with "
               "submit_recommendation.")
     if status == "no_change":
-        nxt = "The new information is not about the appliance or fault, so nothing changes. " + stands
+        nxt = ("The assessor found the new information could not change its judgement for this "
+               "fault, so nothing changes. " + stands)
     elif status == "reassessment_failed":
         nxt = ("The re-assessment could not be run, so there is no new assessment and nothing "
                "to resubmit. " + stands + " The resident's new information is recorded and "

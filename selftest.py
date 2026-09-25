@@ -665,6 +665,15 @@ async def main():
     check("the re-assessment instructions carry the relevance check; a first assessment's do not",
           subagent.REINVOCATION in subagent.system_prompt("Washer Dryer", b2["fault_slug"], True)
           and subagent.REINVOCATION not in subagent.system_prompt("Washer Dryer", b2["fault_slug"]))
+    # Spec, "Two relevance standards": the main agent passes on anything about the appliance
+    # or the fault; the subagent re-assesses only if it could change the judgement.
+    check("two relevance standards: the subagent asks 'could this change the judgement', "
+          "the main agent still passes on anything about the appliance or the fault",
+          "could the new information change the repair-vs-replace judgement"
+          in " ".join(subagent.REINVOCATION.split())
+          and "is the new information about the appliance or the fault"
+          not in " ".join(subagent.REINVOCATION.split())
+          and "about the appliance or the fault" in " ".join(prompts.BOOKING.split()))
     r = await reassess(dict(relevant, new_information=["The door seal has a split in it"]))
     check("the superseded assessment cannot be re-assessed from", r.get("is_error"),
           r["content"][0]["text"][:160])

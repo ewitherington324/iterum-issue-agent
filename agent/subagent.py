@@ -36,7 +36,8 @@ contra-indicators is refused and the subagent can correct it.
 Re-invocation (build step 3) uses the same session shape. The main agent passes only the
 previous assessment ID and the new quotes; `build_reinvocation_brief` rebuilds the rest
 from the log. The subagent's instructions gain a relevance section, and it has a second
-exit, submit_no_change, for new information that is not about the appliance or fault. The
+exit, submit_no_change, for new information that could not change the judgement for this
+fault (a narrower test than the main agent's "about the appliance or the fault"). The
 cap of two re-invocations is enforced by the caller, not here.
 """
 
@@ -414,14 +415,24 @@ You do not talk to the resident, contact anyone, book anything or change any rec
 REINVOCATION = """THIS IS A RE-ASSESSMENT. The issue was assessed before, and the resident has \
 since said something new, shown under "NEW since the last assessment".
 
-First decide one thing: is the new information about the appliance or the fault - a symptom, \
-something they saw, heard, smelt or tried? A complaint, a scheduling preference, a remark \
-about a previous engineer, or how frustrated they are is not.
+First decide one thing: could the new information change the repair-vs-replace judgement \
+for this fault? That is a narrower question than whether it is about the appliance. The \
+information reached you because it is about the appliance or the fault; your test is whether \
+it bears on this fault's code or confidence - a new or changed symptom, something that points \
+to a different or additional failed part, something that changes the likely repair cost, or \
+something that changes what is known about the appliance's condition or history.
 
-- If it is not about the appliance or the fault, do not re-assess. Call submit_no_change with \
-a one-sentence reason. The earlier assessment stands.
-- If it is, assess all of the evidence afresh - the earlier evidence and the new - exactly as \
-you would a first assessment, and call submit_assessment."""
+It could not if it is a long-standing minor condition unrelated to this fault, a cosmetic \
+detail, or something that would be worth the engineer noting on site but would not move a \
+repair towards a replacement or away from one. A complaint, a scheduling preference, a remark \
+about a previous engineer, or how frustrated they are never could.
+
+- If it could not change the judgement, do not re-assess. Call submit_no_change with a \
+one-sentence reason saying why it does not bear on this fault. The earlier assessment stands. \
+Do not re-assess just to mention it: a new assessment replaces the submitted one and clears any \
+approvals given on it.
+- If it could, assess all of the evidence afresh - the earlier evidence and the new - exactly \
+as you would a first assessment, and call submit_assessment."""
 
 
 # Loaded at import so a missing skill fails at startup, not mid-thread (invariant 6).
@@ -510,8 +521,9 @@ async def submit_assessment(args):
 
 
 @tool("submit_no_change",
-      "Re-assessments only. Call instead of submit_assessment when the new information is "
-      "not about the appliance or the fault, with a one-sentence reason.",
+      "Re-assessments only. Call instead of submit_assessment when the new information "
+      "could not change the repair-vs-replace judgement for this fault, with a one-sentence "
+      "reason.",
       {"type": "object",
        "properties": {"reason": {"type": "string"}},
        "required": ["reason"],
@@ -525,8 +537,8 @@ async def submit_no_change(args):
         return _err("An answer has already been submitted for this run.")
     reason = str(args.get("reason", "")).strip()
     if not reason:
-        return _err("Give the reason the new information is not about the appliance or "
-                    "the fault.")
+        return _err("Give the reason the new information could not change the judgement "
+                    "for this fault.")
     _no_change_reason = reason
     return _ok("No change recorded. You are done.")
 
