@@ -127,10 +127,15 @@ def assess_heuristic(age_years: float, repair_cost: float, replacement_cost: flo
 
     if in_warranty:
         return {
-            "source": "age_cost_heuristic",
+            "source": "fallback",
             "code": "D", "confidence": 1.0,
             "confidence_basis": "deterministic: warranty status is a fact, not an estimate",
             "rationale": "Appliance is inside its manufacturer warranty, so the OEM handles it.",
+            "evidence_used": ["Appliance is inside its manufacturer warranty"],
+            "evidence_missing": [],
+            "limits_applied": [],
+            "contra_indicators": [],
+            "determinative": False,
             "inputs": {"age_years": age_years, "in_warranty": True},
         }
 
@@ -178,12 +183,25 @@ def assess_heuristic(age_years: float, repair_cost: float, replacement_cost: flo
         confidence = round(min(confidence + 0.05, 0.97), 2)
 
     return {
-        "source": "age_cost_heuristic",
+        "source": "fallback",
         "code": code,
         "confidence": confidence,
         "confidence_basis": ("computed: distance from the cost-ratio and age decision "
                              "boundaries" + (", two signals in agreement" if agreement else "")),
         "rationale": rationale,
+        "evidence_used": [
+            f"{age_years:.1f} years old against the {LOW_FUTURE_VALUE_AGE_YEARS}-year line",
+            f"Repair {ratio:.0%} of replacement against the {BER_COST_RATIO:.0%} boundary",
+        ],
+        # The rules-based path weighs age and cost only. Saying so is the honest version
+        # of evidence_missing here - the fault itself was never looked at.
+        "evidence_missing": [
+            "Triage evidence and fault class - not considered by the rules-based path",
+            "Comparable past jobs - not considered by the rules-based path",
+        ],
+        "limits_applied": [],
+        "contra_indicators": [],
+        "determinative": False,
         "inputs": {
             "age_years": age_years, "repair_cost": repair_cost,
             "replacement_cost": replacement_cost, "cost_ratio": round(ratio, 3),

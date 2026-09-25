@@ -47,9 +47,9 @@ Troubleshooting steps must be safe for a resident to do alone. No electrical wor
 disassembly, nothing behind a fixed panel. No tools beyond what any household has. Filters, \
 seals, visible hoses, settings and power cycling are fine.
 
-Any recommendation you make about repair versus replacement is PROVISIONAL ROUTING to decide \
-what kind of visit to send. It is never a certain diagnosis, and you must never present it to \
-anyone as one.
+The repair-versus-replace recommendation is PROVISIONAL ROUTING to decide what kind of visit \
+to send. It comes from a separate assessment, not from you. It is never a certain diagnosis, \
+and you must never present it to anyone as one.
 
 In-warranty appliances leave your flow entirely. The manufacturer dispatches their own \
 engineer. You do not book, quote or schedule anything for them.
@@ -133,20 +133,16 @@ DECISION = """Triage is complete. Here is what it established:
 
 Run the REPAIR VS REPLACE loop.
 
-Use what triage found, the appliance's age and history, and comparable past jobs to decide \
-whether this is a repair or a replacement. assess_repair_vs_replace gives you a structured \
-assessment; treat it as an input to your judgement, not as the answer. If comparable jobs \
-disagree with it, or triage found something the assessment did not account for, say so.
+The repair-versus-replace judgement is not yours to make. Call assess_repair_vs_replace once, \
+passing the appliance id, the issue as reported and what triage established. It returns an \
+assessment with an assessment_id.
 
-Pay particular attention to any past job that was booked as a repair and became a replacement \
-on site. Catching that in advance is the main reason this step exists.
-
-When you have a view, call submit_recommendation with the code, your confidence between 0 and \
-1, and your reasoning. The confidence threshold in use is {threshold}. If you land below it, \
-still submit - but say in the rationale what you are uncertain about."""
+Then call submit_recommendation with that assessment_id and nothing else. The assessment's \
+code, confidence and rationale are submitted exactly as it produced them. You cannot change \
+them, and you should not restate or reinterpret them."""
 
 
-BOOKING = """Your recommendation is logged:
+BOOKING = """The repair-vs-replace assessment is logged as {assessment_id}:
 
   Code {code} - {code_meaning}
   Confidence {confidence} (threshold {threshold})
@@ -155,7 +151,7 @@ BOOKING = """Your recommendation is logged:
 Run the BOOKING loop.
 
 If this is a REPLACEMENT (code A or C), it is gated. The engineer must confirm or override \
-your recommendation first - send it to them with send_engineer_message. If they override you, \
+the recommendation first - send it to them with send_engineer_message. If they override it, \
 their assessment wins; re-plan on that basis. If the cost is over the property manager's \
 threshold of GBP {pm_threshold:.0f}, you also need their approval by email before booking.
 

@@ -13,7 +13,7 @@ Module 3 work follows docs/module3/SUBAGENT_SPEC.md. If the code and the spec di
 
 ```bash
 ./run.sh                              # http://localhost:8000
-.venv/bin/python selftest.py          # 44 checks, no API key, ~1s — use this constantly
+.venv/bin/python selftest.py          # 66 checks, no API key, ~1s — use this constantly
 .venv/bin/python verify.py            # all 8 scenarios against the real model (~$3)
 .venv/bin/python verify.py self_fix   # one scenario, verbose trace (~$0.15–0.70)
 ```
@@ -78,6 +78,7 @@ agent/trace.py      PreToolUse/PostToolUse hooks — trace, guardrails, decision
 agent/prompts.py    system prompt + per-loop instructions
 agent/fallbacks.py  rules-based path for the A/B (fault lookup + age/cost heuristic)
 agent/reasoning.py  the two LLM reasoning calls, structured output via Pydantic
+agent/assessments.py the repair-vs-replace assessment log; submit_recommendation reads from it by ID
 agent/config.py     KNOBS — the PRD's open questions, live-editable from the UI
 agent/skills.py     loads skills/ — system prompts for the two reasoning calls, plus the
                     per-fault reference section selected by fault_slug

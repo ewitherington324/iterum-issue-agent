@@ -139,7 +139,7 @@ async def run_scenario(scenario_id: str, auto_play: bool = True) -> dict:
 
             # --- Loop 2: repair vs replace --------------------------------------------
             decision = await _phase(client, s, session.DECISION, prompts.DECISION.format(
-                findings=triage["findings"], threshold=KNOBS.confidence_threshold))
+                findings=triage["findings"]))
             if decision is None:
                 BUS.publish("run_incomplete", loop=session.DECISION,
                             detail="The decision loop ended without calling submit_recommendation.")
@@ -147,6 +147,7 @@ async def run_scenario(scenario_id: str, auto_play: bool = True) -> dict:
 
             # --- Loop 3: booking ------------------------------------------------------
             await _phase(client, s, session.BOOKING, prompts.BOOKING.format(
+                assessment_id=decision["assessment_id"],
                 code=decision["code"],
                 code_meaning=RECOMMENDATION_CODES.get(decision["code"], "unknown"),
                 confidence=decision["confidence"],

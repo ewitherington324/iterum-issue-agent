@@ -113,11 +113,19 @@ One assessment, logged with its own ID:
 | `evidence_missing` | What would have changed it (e.g. a photo) |
 | `limits_applied` | Any confidence limits from the skill, and why (see below) |
 | `source` | `subagent` or `fallback` |
+| `contra_indicators` | The strongest case against its own code. Required unless determinative |
+| `determinative` | True when the code came from the skill's fixed-outcome list, not from weighing |
+| `confidence_basis` | Where the confidence came from: self-reported (subagent) or computed (fallback) |
 
 **Confidence limits.** Confidence can normally be anywhere from 0 to 1. The skill sets a ceiling
 in a few specific situations where key evidence is missing — for example, a fault that should be
 confirmed by photo can't score above a set level without one, however sure the reasoning feels.
 The subagent records when one of these ceilings applied, so it's visible rather than buried.
+
+One narrow check sits in code: confidence can never exceed a limit the assessment itself
+reports in `limits_applied`. If it does, it is held at the lowest reported limit and the cap
+is recorded on the assessment and in the log. The code does not decide whether a limit
+*should* have applied — that stays with the skill.
 
 ## Constraints
 

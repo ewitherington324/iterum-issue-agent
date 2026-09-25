@@ -136,12 +136,11 @@ def _no_triage_after_danger(rec: "Recorder") -> bool:
                 if e["tool"] == "get_triage_steps" and e["seq"] > after]
 
 def _assessment(rec: "Recorder") -> dict:
-    """The raw assess_repair_vs_replace payload, from the event stream.
+    """The latest assess_repair_vs_replace payload, from the event stream.
 
-    `issue["recommendation"]` and `issue["confidence"]` carry only what
-    submit_recommendation restated, and the two drifted from the assessment on every
-    scenario measured so far. `determinative`, `evidence_gaps` and the inputs the call
-    actually weighed are not written to the issue at all, so they can only be read here.
+    Since Module 3 the same record is also in `issue["assessments"]`, and
+    submit_recommendation copies code and confidence from it by ID. Reading it from the
+    stream keeps this independent of that path, so the match check below means something.
     """
     for e in reversed(rec.of("tool_result")):
         if e.get("tool") == "assess_repair_vs_replace":
@@ -190,6 +189,19 @@ def expectations(sid: str, rec: Recorder, summary: dict) -> list[tuple[str, bool
         ("triage loop exited explicitly", bool(triage), "complete_triage never called"),
     ]
 
+    # Module 3: what was submitted must be exactly what the assessment produced.
+    decision = summary["exits"].get("decision")
+    if decision:
+        a = _assessment(rec)
+        checks.append((
+            "submitted recommendation matches the assessment exactly",
+            bool(a) and decision.get("assessment_id") == a.get("assessment_id")
+            and decision.get("code") == a.get("code")
+            and decision.get("confidence") == a.get("confidence"),
+            f"submitted {decision.get('assessment_id')} {decision.get('code')} "
+            f"{decision.get('confidence')} vs assessed {a.get('assessment_id')} "
+            f"{a.get('code')} {a.get('confidence')}"))
+
     if sid == "self_fix":
         checks += [
             ("triage outcome is self_resolved", triage.get("outcome") == "self_resolved",
@@ -237,7 +249,7 @@ def expectations(sid: str, rec: Recorder, summary: dict) -> list[tuple[str, bool
         det = a.get("determinative")
         inp = a.get("inputs") or {}
         age, ratio = inp.get("age_years"), inp.get("cost_ratio")
-        gaps = a.get("evidence_gaps") or []
+        gaps = a.get("evidence_missing") or []
         pm_opened = [e for e in rec.of("gate_opened") if e.get("gate") == "pm"]
         ceiling = 0.6
         checks += [
@@ -258,7 +270,7 @@ def expectations(sid: str, rec: Recorder, summary: dict) -> list[tuple[str, bool
             # stand in for confirmation.
             (f"confidence is {ceiling} or below - no photo was obtainable",
              isinstance(conf, (int, float)) and conf <= ceiling, f"confidence={conf!r}"),
-            ("the missing photo is named in evidence_gaps",
+            ("the missing photo is named in evidence_missing",
              any("photo" in str(g).lower() for g in gaps), str(gaps)),
 
             # Routing is unchanged by determinative: high-certainty replace still buys a

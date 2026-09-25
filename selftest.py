@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from agent import gates, session, trace  # noqa: E402
+from agent import assessments, gates, prompts, session, trace  # noqa: E402
 from agent.config import KNOBS  # noqa: E402
 from agent.fallbacks import assess_heuristic  # noqa: E402
 from agent.runner import build_options  # noqa: E402
@@ -190,6 +190,117 @@ async def main():
                                STORE.warranty(app)["in_warranty"])
         check(f"{sid}: heuristic gives {expected} (conf {res['confidence']})",
               res["code"] == expected, f"got {res['code']}")
+
+    # ---------------------------------------------------------------- Module 3: output table
+    section("Repair-vs-replace output table (Module 3)")
+    from agent.reasoning import RepairVsReplace, assessment_from_model
+    parsed = RepairVsReplace(code="A", confidence=0.6, rationale="r", key_factors=["k"],
+                             evidence_gaps=["No photo"], determinative=True,
+                             limits_applied=[{"limit": 0.6, "reason": "no photo"}])
+    mapped = assessment_from_model(parsed, inputs={})
+    table = [f for f in assessments.TABLE_FIELDS if f not in ("assessment_id", "status")]
+    check("subagent output fills every field of the table",
+          all(f in mapped for f in table), str([f for f in table if f not in mapped]))
+    check("  ...with source 'subagent'", mapped["source"] == "subagent", mapped["source"])
+    STORE.load_scenario("clear_repair")
+    issue = STORE.active_issue()
+    app = STORE.appliance(issue["appliance_id"])
+    fb = assess_heuristic(STORE.appliance_age_years(app), issue["estimated_repair_cost"],
+                          issue["estimated_replacement_cost"], False)
+    check("fallback output fills every field of the table",
+          all(f in fb for f in table), str([f for f in table if f not in fb]))
+    check("  ...with source 'fallback'", fb["source"] == "fallback", fb["source"])
+
+    # ---------------------------------------------------------------- Module 3: reported-limit cap
+    section("Confidence never exceeds a limit the assessment reported (Module 3)")
+    STORE.load_scenario("cracked_hob")
+    issue = STORE.active_issue()
+    over = dict(mapped, confidence=0.78,
+                limits_applied=[{"limit": 0.6, "reason": "no photo"},
+                                {"limit": 0.5, "reason": "no triage evidence"}])
+    a = assessments.record(issue, issue["appliance_id"], over)
+    check("0.78 with reported limits 0.6 and 0.5 is held at the lowest, 0.5",
+          a["confidence"] == 0.5, f"confidence={a['confidence']}")
+    check("  ...and the cap is recorded on the assessment",
+          (a.get("confidence_capped") or {}).get("reported") == 0.78, str(a.get("confidence_capped")))
+    check("  ...and meets_threshold uses the capped value", a["meets_threshold"] is False)
+    under = assessments.record(issue, issue["appliance_id"], dict(mapped, confidence=0.55))
+    check("confidence under its reported limit is left alone",
+          under["confidence"] == 0.55 and "confidence_capped" not in under)
+    none = assessments.record(issue, issue["appliance_id"],
+                              dict(mapped, confidence=0.9, limits_applied=[]))
+    check("no reported limit means no cap - the code does not invent one",
+          none["confidence"] == 0.9 and "confidence_capped" not in none)
+
+    # ---------------------------------------------------------------- Module 3: submit by ID
+    section("submit_recommendation takes an assessment ID only (Module 3)")
+    import jsonschema
+    from agent.tools import assess_repair_vs_replace, submit_recommendation
+    schema = submit_recommendation.input_schema
+    check("schema has assessment_id as its only property",
+          list(schema.get("properties", {})) == ["assessment_id"], str(schema))
+    try:
+        jsonschema.validate({"assessment_id": "x", "code": "B", "confidence": 0.9}, schema)
+        check("schema rejects a code or confidence alongside the ID", False, "validated")
+    except jsonschema.ValidationError:
+        check("schema rejects a code or confidence alongside the ID", True)
+
+    STORE.load_scenario("clear_repair")
+    s = session.set_current(session.IssueSession(json.loads(Path("scenarios/clear_repair.json").read_text())))
+    s.enter_loop(session.DECISION)
+    issue = STORE.active_issue()
+    KNOBS.use_llm_for_decision_analysis = False  # no API key here: the fallback path
+    out = await assess_repair_vs_replace.handler({"appliance_id": issue["appliance_id"],
+                                                  "issue_description": "d", "triage_findings": "f"})
+    first = json.loads(out["content"][0]["text"])
+    check("assess_repair_vs_replace returns an assessment_id",
+          first.get("assessment_id") == f"{issue['id']}-RVR-1", str(first.get("assessment_id")))
+    check("  ...and adds it to the issue's assessment log",
+          assessments.latest(issue)["assessment_id"] == first["assessment_id"])
+    out = await assess_repair_vs_replace.handler({"appliance_id": issue["appliance_id"],
+                                                  "issue_description": "d", "triage_findings": "f"})
+    second = json.loads(out["content"][0]["text"])
+    KNOBS.use_llm_for_decision_analysis = True
+
+    sub = submit_recommendation.handler
+    r = await sub({"assessment_id": second["assessment_id"], "code": "B", "confidence": 0.99})
+    check("handler refuses a code or confidence passed with the ID", r.get("is_error"))
+    r = await sub({"assessment_id": "ISS-NOPE-RVR-9"})
+    check("handler refuses an unknown assessment ID", r.get("is_error"))
+    r = await sub({"assessment_id": first["assessment_id"]})
+    check("handler refuses an assessment that is not the latest", r.get("is_error"),
+          r["content"][0]["text"][:120])
+    check("nothing was submitted by the refused calls", session.DECISION not in s.exits)
+    r = await sub({"assessment_id": second["assessment_id"]})
+    exit_ = s.exits.get(session.DECISION, {})
+    check("the latest assessment is accepted", not r.get("is_error"), r["content"][0]["text"][:120])
+    check("submitted code and confidence equal the assessment exactly",
+          exit_.get("code") == second["code"] and exit_.get("confidence") == second["confidence"]
+          and issue["recommendation"] == second["code"]
+          and issue["confidence"] == second["confidence"],
+          f"exit={exit_.get('code')}/{exit_.get('confidence')} "
+          f"assessed={second['code']}/{second['confidence']}")
+    check("  ...and the rationale is the assessment's, not restated",
+          exit_.get("rationale") == second["rationale"])
+
+    # ---------------------------------------------------------------- Module 3: skill isolation
+    section("The repair-vs-replace skill never reaches the main agent (Module 3)")
+    import re
+    from agent.skills import DECISION_SKILL, load_skill
+
+    def shingles(text, n=6):
+        words = re.findall(r"[a-z0-9]+", text.lower())
+        return {" ".join(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+    skill = shingles(load_skill(DECISION_SKILL))
+    main_agent_text = {name: getattr(prompts, name) for name in ("SYSTEM", "TRIAGE", "DECISION", "BOOKING")}
+    main_agent_text.update({f"tool:{t.name}": t.description for t in ALL_TOOLS})
+    leaks = {k: sorted(shingles(v) & skill)[:3] for k, v in main_agent_text.items()
+             if shingles(v) & skill}
+    check("no six-word run of the skill appears in any prompt or tool description",
+          not leaks, str(leaks))
+    check("the DECISION prompt no longer asks the main agent for its own judgement",
+          "your judgement" not in prompts.DECISION and "your confidence" not in prompts.DECISION)
 
     # ---------------------------------------------------------------- summary
     total, passed = len(results), sum(results)

@@ -27,7 +27,7 @@ Main agent — one session per issue (agent/runner.py)
    │
    ├─ 2. REPAIR VS REPLACE
    │     └─ calls assess_repair_vs_replace ──► separate AI call, instructions = repair-vs-replace skill
-   │     ends with submit_recommendation (code A/B/C/D + confidence)
+   │     ends with submit_recommendation (the assessment's ID — code and confidence come from the log)
    │
    └─ 3. BOOKING ────── checks stock, proposes slots (fixed rule), books
          book_visit is held by a gate until the engineer (and PM, if over £400) approve
@@ -44,13 +44,14 @@ own instructions (`agent/prompts.py`) so they apply from the first message.
 | `agent/tools.py` | The 18 tools the agent can use (15 from the PRD + 3 "I'm done with this phase" tools) |
 | `agent/reasoning.py` | The two separate AI calls (troubleshooting steps, repair vs. replace) |
 | `agent/skills.py` | Reads the skill files and hands them to those calls |
+| `agent/assessments.py` | The assessment log. Each repair-vs-replace answer gets an ID; the main agent submits the ID, never its own numbers |
 | `agent/fallbacks.py` | Rules-based backup for both calls, used if the AI path is switched off or fails |
 | `agent/gates.py` | The engineer / PM approval gate on booking |
 | `agent/trace.py` | Guardrails (e.g. the warranty block) and the decision log |
 | `agent/prompts.py` | Main agent instructions, including the escalation rules |
 | `skills/` | The three Module 2 skills + ten appliance fault references |
 | `scenarios/` | The 8 test cases |
-| `selftest.py` | 44 quick checks, free, no API key |
+| `selftest.py` | 66 quick checks, free, no API key |
 | `verify.py` | Runs scenarios against the real model — costs money |
 | `static/`, `server.py` | The browser demo |
 | `docs/` | PRD, this map, and `module2/` (submitted write-up, evidence, old prompts) |

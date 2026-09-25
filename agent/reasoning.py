@@ -34,6 +34,11 @@ class TriageSteps(BaseModel):
                                          "nothing applies.")
 
 
+class ConfidenceLimit(BaseModel):
+    limit: float = Field(ge=0.0, le=1.0, description="The ceiling your instructions set.")
+    reason: str = Field(description="Which rule set it and what evidence was missing.")
+
+
 class RepairVsReplace(BaseModel):
     code: Literal["A", "B", "C", "D"]
     confidence: float = Field(description="0 to 1.", ge=0.0, le=1.0)
@@ -52,6 +57,12 @@ class RepairVsReplace(BaseModel):
         default=False,
         description="True when the code came from the fixed-outcome list (e.g. cracked hob "
                     "glass) rather than from weighing the six factors.")
+    limits_applied: list[ConfidenceLimit] = Field(
+        default_factory=list,
+        description="Every confidence ceiling from your instructions that applied to this "
+                    "assessment because evidence was missing (for example, no photo of a "
+                    "reported crack). Empty if none applied. Your confidence must not "
+                    "exceed any limit listed here.")
 
     @model_validator(mode="after")
     def _contra_required_unless_determinative(self):
@@ -159,22 +170,31 @@ async def llm_assess_repair_vs_replace(appliance: dict, age_years: float, warran
         output_format=RepairVsReplace,
     )
     parsed: RepairVsReplace = response.parsed_output
+    return assessment_from_model(parsed, inputs={
+        "age_years": age_years, "repair_cost": repair_cost,
+        "replacement_cost": replacement_cost, "cost_ratio": round(ratio, 3),
+        "in_warranty": warranty["in_warranty"],
+        "comparable_jobs_considered": len(comparable_jobs),
+    })
+
+
+def assessment_from_model(parsed: RepairVsReplace, inputs: dict) -> dict:
+    """Map the model's structured output onto the spec's output table.
+
+    Separate from the call so selftest can check the mapping without an API key.
+    """
     return {
-        "source": "llm_reasoning_call",
+        "source": "subagent",
         "model": KNOBS.model,
         "skill": DECISION_SKILL,
         "code": parsed.code,
         "confidence": round(parsed.confidence, 2),
+        "rationale": parsed.rationale,
+        "evidence_used": parsed.key_factors,
+        "evidence_missing": parsed.evidence_gaps,
+        "limits_applied": [l.model_dump() for l in parsed.limits_applied],
         "contra_indicators": parsed.contra_indicators,
-        "evidence_gaps": parsed.evidence_gaps,
         "determinative": parsed.determinative,
         "confidence_basis": "self-reported by the model, not a computed quantity",
-        "rationale": parsed.rationale,
-        "key_factors": parsed.key_factors,
-        "inputs": {
-            "age_years": age_years, "repair_cost": repair_cost,
-            "replacement_cost": replacement_cost, "cost_ratio": round(ratio, 3),
-            "in_warranty": warranty["in_warranty"],
-            "comparable_jobs_considered": len(comparable_jobs),
-        },
+        "inputs": inputs,
     }

@@ -177,6 +177,9 @@ This maps onto the `RepairVsReplace` model in `agent/reasoning.py`. The first fo
     "What argues against this code, stated as strongly as you can put it"
   ],
   "evidence_gaps": ["No model number on record"],
+  "limits_applied": [
+    {"limit": 0.6, "reason": "Which confidence ceiling applied, and what missing evidence triggered it"}
+  ],
   "determinative": false
 }
 ```

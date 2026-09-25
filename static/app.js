@@ -136,7 +136,7 @@ function plain(cls, text) {
    the parts that ARE the skills' contribution, so the before/after is visible rather
    than asserted:
 
-     - decision skill  -> contra_indicators, evidence_gaps, determinative
+     - decision skill  -> contra_indicators, evidence_missing, limits_applied, determinative
      - triage skill    -> fault_slug and whether its reference section matched
 
    Both fall back quietly: on the rules-based path there are no contra_indicators and
@@ -196,8 +196,8 @@ function assessmentCard(a) {
   }
 
   if (a.rationale) card.appendChild(textBlock("Rationale", a.rationale));
-  if (a.key_factors && a.key_factors.length)
-    card.appendChild(listBlock("Key factors", a.key_factors));
+  if (a.evidence_used && a.evidence_used.length)
+    card.appendChild(listBlock("Evidence used", a.evidence_used));
 
   // The headline addition. Empty is now a validation error on a weighed call, so an
   // absent list here means the rules-based path, not a silent miss.
@@ -205,12 +205,20 @@ function assessmentCard(a) {
     card.appendChild(listBlock("Contra-indicators \u2014 what argues against this code",
       a.contra_indicators, "contra"));
   }
-  if (a.evidence_gaps && a.evidence_gaps.length)
-    card.appendChild(listBlock("Evidence gaps", a.evidence_gaps, "gaps"));
+  if (a.evidence_missing && a.evidence_missing.length)
+    card.appendChild(listBlock("Evidence missing", a.evidence_missing, "gaps"));
+  if (a.limits_applied && a.limits_applied.length)
+    card.appendChild(listBlock("Confidence limits applied",
+      a.limits_applied.map((l) => `${Number(l.limit).toFixed(2)} \u2014 ${l.reason}`), "gaps"));
+  if (a.confidence_capped)
+    card.appendChild(textBlock("Confidence capped",
+      `Reported ${Number(a.confidence_capped.reported).toFixed(2)}, held at ` +
+      `${Number(a.confidence_capped.capped_to).toFixed(2)} by its own reported limit.`, "gaps"));
 
   const src = el("div", "skill-src");
   src.appendChild(el("span", "pill grey", a.skill || "rules-based heuristic"));
-  src.appendChild(el("span", null, a.source === "llm_reasoning_call"
+  if (a.assessment_id) src.appendChild(el("span", "pill grey", a.assessment_id));
+  src.appendChild(el("span", null, a.source === "subagent"
     ? "reasoning call" : "fallback path \u2014 no skill in context"));
   if (a.confidence_basis) src.appendChild(el("span", "basis", a.confidence_basis));
   card.appendChild(src);

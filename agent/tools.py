@@ -15,8 +15,8 @@ from datetime import date, timedelta
 
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
-from . import session
-from .config import KNOBS, RECOMMENDATION_CODES
+from . import assessments, session
+from .config import KNOBS
 from .events import BUS
 from .fallbacks import assess_heuristic, lookup_triage_steps
 from .reasoning import llm_assess_repair_vs_replace, llm_triage_steps
@@ -201,9 +201,10 @@ async def get_triage_steps(args):
 
 
 @tool("assess_repair_vs_replace",
-      "Assess whether this issue is a repair or a replacement. Returns a recommendation "
-      "code (A beyond economic repair, B repair, C low future value, D in warranty), a "
-      "confidence, and a rationale. This is provisional routing, not a diagnosis.",
+      "Get the repair-vs-replace assessment for this issue. It is made separately from you "
+      "and logged with an assessment_id; its code, confidence and rationale are final. "
+      "Submit it with submit_recommendation using that assessment_id. This is provisional "
+      "routing, not a diagnosis.",
       {"appliance_id": str, "issue_description": str, "triage_findings": str})
 async def assess_repair_vs_replace(args):
     appliance = STORE.appliance(args["appliance_id"])
@@ -236,12 +237,11 @@ async def assess_repair_vs_replace(args):
     else:
         result = assess_heuristic(age, repair, replace, warranty["in_warranty"])
 
-    result["code_meaning"] = RECOMMENDATION_CODES.get(result["code"], "unknown")
     result["estimated_repair_cost"] = repair
     result["estimated_replacement_cost"] = replace
-    result["confidence_threshold"] = KNOBS.confidence_threshold
-    result["meets_threshold"] = result["confidence"] >= KNOBS.confidence_threshold
-    return ok(result)
+    assessment = assessments.record(issue, appliance["id"], result)
+    STORE.save()
+    return ok(assessment)
 
 
 # =====================================================================================
@@ -470,27 +470,55 @@ async def complete_triage(args):
 
 
 @tool("submit_recommendation",
-      "Exit the repair-vs-replace loop with your call. code is A, B, C or D. confidence is "
-      "0 to 1. State the recommendation as provisional routing, never as a certain diagnosis.",
-      {"code": str, "confidence": float, "rationale": str})
+      "Exit the repair-vs-replace loop by submitting the latest assessment for this issue. "
+      "Takes the assessment_id from assess_repair_vs_replace and nothing else - the code, "
+      "confidence and rationale are read from the assessment log, exactly as assessed.",
+      {"type": "object",
+       "properties": {"assessment_id": {"type": "string",
+                                        "description": "From assess_repair_vs_replace"}},
+       "required": ["assessment_id"],
+       "additionalProperties": False})
 async def submit_recommendation(args):
+    # The schema already rejects extra arguments; this repeats it in the handler so the
+    # rule holds however the tool is reached, and so the refusal says why.
+    extra = sorted(set(args) - {"assessment_id"})
+    if extra:
+        return err(f"submit_recommendation takes only assessment_id, not {extra}. The "
+                   "assessment's code, confidence and rationale are final and are read "
+                   "from the assessment log.")
+
+    issue = STORE.active_issue()
+    assessment_id = str(args.get("assessment_id", "")).strip()
+    assessment = assessments.find(issue, assessment_id)
+    if assessment is None:
+        return err(f"No assessment {assessment_id!r} exists for issue {issue['id']}. Call "
+                   "assess_repair_vs_replace and submit the assessment_id it returns.")
+    newest = assessments.latest(issue)
+    if assessment is not newest:
+        return err(f"{assessment_id} is not the latest assessment for this issue. Only "
+                   f"the latest can be submitted: {newest['assessment_id']}.")
+    if assessment["status"] != "assessed":
+        return err(f"{assessment_id} has status '{assessment['status']}' and carries no "
+                   "recommendation to submit.")
+
     s = session.current()
-    code = args["code"].strip().upper()[:1]
-    payload = {"code": code, "confidence": args["confidence"],
-               "rationale": args["rationale"],
-               "code_meaning": RECOMMENDATION_CODES.get(code, "unknown"),
-               "meets_threshold": args["confidence"] >= KNOBS.confidence_threshold,
+    code, confidence = assessment["code"], assessment["confidence"]
+    payload = {"assessment_id": assessment_id, "source": assessment["source"],
+               "code": code, "confidence": confidence,
+               "rationale": assessment["rationale"],
+               "code_meaning": assessment["code_meaning"],
+               "meets_threshold": confidence >= KNOBS.confidence_threshold,
                "threshold": KNOBS.confidence_threshold,
                "iterations": s.loop_iteration}
     s.record_exit(session.DECISION, payload)
-    issue = STORE.active_issue()
     issue["recommendation"] = code
-    issue["confidence"] = args["confidence"]
-    issue["recommendation_rationale"] = args["rationale"]
+    issue["confidence"] = confidence
+    issue["recommendation_rationale"] = assessment["rationale"]
+    issue["recommendation_assessment_id"] = assessment_id
     STORE.save()
     BUS.publish("loop_exit", loop=session.DECISION, **payload)
-    return ok(f"Recommendation {code} logged at confidence {args['confidence']:.2f} "
-              f"(threshold {KNOBS.confidence_threshold:.2f}).")
+    return ok(f"Assessment {assessment_id} submitted: code {code} at confidence "
+              f"{confidence:.2f} (threshold {KNOBS.confidence_threshold:.2f}).")
 
 
 @tool("conclude_booking",
