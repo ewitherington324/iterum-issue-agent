@@ -7,6 +7,7 @@ system (IQ, Airtable, WhatsApp, Mailgun) is mocked.
 
 Read `docs/PROJECT_MAP.md` for the one-page orientation, then `README.md` for the demo script and the architecture rationale. This file is the
 short version plus the things that will bite you.
+Module 3 work follows docs/module3/SUBAGENT_SPEC.md. If the code and the spec disagree, stop and ask. Don't resolve it silently.
 
 ## Commands
 

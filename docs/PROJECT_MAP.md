@@ -84,3 +84,4 @@ Most relevant to Module 3 first.
 - **Module 3 (now):** repair vs. replace becomes a subagent.
 - **Next steps, noted not built:** scheduling as a reasoning subagent (replacing the fixed slot
   rule); an engineer brief writer.
+- module 3 sub-agent spec found here: docs/module3/SUBAGENT_SPEC.md
