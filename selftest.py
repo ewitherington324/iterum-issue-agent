@@ -83,7 +83,7 @@ async def main():
     # ---------------------------------------------------------------- scenarios load
     section("Scenarios")
     ids = sorted(p.stem for p in Path("scenarios").glob("*.json"))
-    check("all eight scenarios present", len(ids) == 8, str(ids))
+    check("all thirteen scenarios present (8 + 5 from Module 3 step 5)", len(ids) == 13, str(ids))
     orders = [json.loads(Path(f"scenarios/{i}.json").read_text())["order"] for i in ids]
     check("scenario orders are unique", len(set(orders)) == len(orders), str(sorted(orders)))
     for sid in ids:
@@ -94,6 +94,34 @@ async def main():
             check(f"{sid} loads with a valid appliance", app is not None)
         except Exception as exc:  # noqa: BLE001
             check(f"{sid} loads", False, str(exc))
+    for sid in ("new_fault_info", "irrelevant_info", "reassessment_cap", "fallback_repair",
+                "frustrated_repair"):
+        STORE.load_scenario(sid)
+        issue = STORE.active_issue()
+        app = STORE.appliance(issue["appliance_id"])
+        res = STORE.resident(issue["resident_id"])
+        persona = json.loads(Path(f"scenarios/{sid}.json").read_text())["resident_persona"]
+        check(f"{sid}: out of warranty, persona name matches the resident record",
+              not STORE.warranty(app)["in_warranty"] and persona["name"] == res["name"],
+              f"{STORE.warranty(app)} / {persona['name']} vs {res['name']}")
+
+    # A scenario's pinned knobs hold for that run only (fallback_repair).
+    from agent import runner
+    seen = {}
+
+    async def fake_body(scenario, scenario_id, auto_play):
+        seen["during"] = KNOBS.use_llm_for_decision_analysis
+        raise RuntimeError("stop here")
+
+    real_body, runner._run = runner._run, fake_body
+    KNOBS.use_llm_for_decision_analysis = True
+    try:
+        await runner.run_scenario("fallback_repair")
+    except RuntimeError:
+        pass
+    runner._run = real_body
+    check("fallback_repair pins the subagent off for its run, then restores the dial",
+          seen.get("during") is False and KNOBS.use_llm_for_decision_analysis is True, str(seen))
 
     # ---------------------------------------------------------------- hook: tool surface
     section("PreToolUse hook - tool surface guardrail")
@@ -198,6 +226,7 @@ async def main():
     expectations = {
         "self_fix": "B", "clear_repair": "B", "likely_replacement": "A",
         "parts_delayed": "B", "resident_rejects": "B", "cracked_hob": "A",
+        "fallback_repair": "B",
     }
     fallback_results = {}
     for sid, expected in expectations.items():
@@ -868,6 +897,22 @@ async def main():
           and "backup rules" in ctx["assessment"]["headline"], str(ctx.get("assessment"))[:200])
     s.resolve_gate("confirm")
     await task
+
+    # ---------------------------------------------------------------- Module 3 step 5
+    section("Confidence threshold is the PRD's 0.7, at or above (Module 3 step 5)")
+    from agent.config import Knobs
+    check("the default threshold is 0.7", Knobs().confidence_threshold == 0.7,
+          str(Knobs().confidence_threshold))
+    KNOBS.confidence_threshold = Knobs().confidence_threshold
+    STORE.load_scenario("clear_repair")
+    issue = STORE.active_issue()
+    for conf, meets in ((0.70, True), (0.69, False)):
+        a = assessments.record(issue, issue["appliance_id"], {
+            "source": "subagent", "code": "B", "confidence": conf, "rationale": "test",
+            "evidence_used": [], "evidence_missing": [], "limits_applied": [],
+            "contra_indicators": ["c"], "determinative": False, "confidence_basis": "test"})
+        check(f"a subagent repair at {conf:.2f} {'meets' if meets else 'does not meet'} it",
+              a["meets_threshold"] is meets and assessments.meets_threshold(a) is meets)
 
     # ---------------------------------------------------------------- summary
     total, passed = len(results), sum(results)

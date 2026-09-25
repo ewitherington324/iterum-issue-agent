@@ -16,9 +16,9 @@ class Knobs:
     """Replacement cost above which the PM must approve by email. PLACEHOLDER - the PRD
     records this as needing a real number."""
 
-    confidence_threshold: float = 0.75
-    """Confidence at which the repair-vs-replace loop exits rather than asking another
-    question. PRD assumption, with the caveat that what underlies the percentage is
+    confidence_threshold: float = 0.7
+    """Confidence at or above which a repair routes autonomously. The PRD's working value
+    (section 8; Module 3 spec, "Constraints"), with the caveat that what underlies the percentage is
     itself undecided - see `confidence_basis` in the decision log."""
 
     max_slot_rejections: int = 3

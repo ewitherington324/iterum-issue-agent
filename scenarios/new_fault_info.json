@@ -1,0 +1,35 @@
+{
+  "id": "new_fault_info",
+  "order": 9,
+  "title": "New fault information mid-booking",
+  "summary": "Fridge section warm on a 6-year-old fridge-freezer; looks like a repair. When the first appointment is offered, the resident reports new symptoms pointing at the compressor. The subagent must be re-invoked and re-assess.",
+  "expected": "First assessment on the triage evidence (likely B). After the new symptoms, reassess_repair_vs_replace is called with the resident's words, the subagent returns a new assessment (status assessed, not no_change), it is submitted before booking, and booking follows the NEW code - engineer gate (and PM gate over GBP 400) if it is A or C, repair path if still B. The engineer note on the visit comes from the new assessment.",
+  "issue": {
+    "id": "ISS-4409",
+    "appliance_id": "app_008",
+    "resident_id": "res_008",
+    "property_id": "prop_hawkings",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Fridge section not staying cold. Resident says food in the fridge is going off; freezer seems fine.",
+    "fault_slug_reported": "fridge_not_cooling",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 180.0,
+    "estimated_replacement_cost": 599.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "Nadia Kowalczyk",
+    "ground_truth": "UNTIL an appointment date is offered: the fridge section is only slightly cool, the freezer is completely fine and frozen hard, and the little fan inside the back of the fridge compartment that used to whirr is silent. The light works. The dial is on its normal setting and nothing is blocking the vents. She has heard nothing else unusual. THEN, between her last message and the moment the support service first offers her a specific appointment date, things got worse: the freezer has started going soft (ice cream soft, frozen peas bendy), and the black box at the bottom of the back of the fridge now clicks every few minutes and is quite warm to the touch. This has only just started - before then it was not happening.",
+    "behaviour": "Friendly, practical, answers what is asked. Will check the dial, the vents and listen for the fan if asked. IMPORTANT TIMING RULE: the very first time the support service offers a specific appointment date or day, do NOT accept or decline it in that reply. Instead say that since you last messaged you have just noticed the freezer going soft and the box at the bottom of the back clicking every few minutes and feeling warm, and ask if that changes anything. Before that moment, never mention the freezer softening or any clicking, because it had not happened yet - if asked earlier whether the freezer is fine, say yes. After you have reported the new symptoms, accept the next appointment date you are offered."
+  }
+}

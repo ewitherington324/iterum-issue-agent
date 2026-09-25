@@ -1,0 +1,35 @@
+{
+  "id": "irrelevant_info",
+  "order": 10,
+  "title": "Irrelevant information mid-booking",
+  "summary": "The clear_repair washer-dryer again. When offered an appointment, the resident mentions a long-standing stiff detergent drawer. It is about the appliance but not the fault: the subagent should return no_change.",
+  "expected": "First assessment B, as in clear_repair. The resident's remark about the detergent drawer is passed to reassess_repair_vs_replace, and the subagent exits with submit_no_change (status no_change). Nothing new is submitted, no approvals are cleared, and the visit is booked on the repair path against the original assessment. If the main agent filters the remark out itself and never re-invokes, the subagent's relevance check is recorded as NOT EXERCISED rather than failed.",
+  "issue": {
+    "id": "ISS-4410",
+    "appliance_id": "app_002",
+    "resident_id": "res_002",
+    "property_id": "prop_hawkings",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Washer-dryer not draining at end of cycle. Resident says it has been getting worse over two weeks.",
+    "fault_slug_reported": "washer_dryer_not_draining",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 165.0,
+    "estimated_replacement_cost": 549.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "Daniel Okonkwo",
+    "ground_truth": "The drain pump has failed. He has ALREADY cleaned the filter twice - it was clean, and it made no difference. There is a low humming noise at the point in the cycle where it should pump out, then nothing happens. No leak. Separately, and unrelated: the detergent drawer has always been a bit stiff to pull out, ever since he moved in two years ago. It opens and closes fine with a firm tug, and it has nothing to do with the draining.",
+    "behaviour": "Practical and a bit impatient - he has already done the obvious things and will say so if asked to repeat them. Works from home so most weekdays are fine. IMPORTANT TIMING RULE: the very first time the support service offers a specific appointment date or day, do NOT accept it in that reply. Instead say the date is probably fine, but mention that the soap drawer has always been a bit stiff to pull out since you moved in, and ask whether the engineer needs to know. Never mention the drawer before that moment. After the service replies to that, accept the date on offer (or the next one offered)."
+  }
+}

@@ -1,6 +1,6 @@
 """Runs every scenario end to end and checks what actually happened.
 
-This is the verification step from the build plan: for each of the eight scenarios,
+This is the verification step from the build plan: for each of the thirteen scenarios,
 confirm the terminal state is the one the PRD says it should be. It plays the human
 actors from a script so the whole sweep runs unattended, which is what makes it useful
 before a demo - you want to know the replacement gate still holds before you show it to
@@ -10,13 +10,25 @@ someone, not during.
     .venv/bin/python verify.py likely_replacement  # one, with the full trace
     .venv/bin/python verify.py --quiet             # summary only
 
-Costs real money - roughly $0.15 to $0.60 per scenario.
+Repeated runs (Module 3 step 5):
+
+    --runs N          run each target N times
+    --rvr             target the scenarios that reach repair-vs-replace
+    --new             target the five Module 3 step 5 scenarios
+    --results NAME    append every run to docs/module3/results/NAME.jsonl and rebuild
+                      NAME.md (results table + consistency) from the whole file, so
+                      several passes can share one table. Without it, a timestamped
+                      name is used.
+    --max-cost USD    do not start another run once this much has been spent
+
+Costs real money - roughly $0.15 to $1.20 per scenario.
 """
 
 import asyncio
 import json
+import subprocess
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -27,7 +39,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(ROOT / ".env")
 
 from agent import session  # noqa: E402
-from agent.config import KNOBS  # noqa: E402
+from agent.config import KNOBS, REPLACE_CODES  # noqa: E402
 from agent.events import BUS  # noqa: E402
 from agent.runner import run_scenario  # noqa: E402
 from agent.store import STORE  # noqa: E402
@@ -37,6 +49,16 @@ G, R, DIM, B, OFF = "\033[32m", "\033[31m", "\033[2m", "\033[1m", "\033[0m"
 ORDER = [p.stem for p in sorted(
     (ROOT / "scenarios").glob("*.json"),
     key=lambda p: __import__("json").loads(p.read_text()).get("order", 99))]
+
+# Scenarios whose issue reaches repair-vs-replace. The other three end in triage and
+# must show the subagent was never called.
+RVR_SCENARIOS = ["clear_repair", "likely_replacement", "cracked_hob", "parts_delayed",
+                 "resident_rejects", "new_fault_info", "irrelevant_info",
+                 "reassessment_cap", "fallback_repair", "frustrated_repair"]
+# Module 3 step 5: the spec's "New scenarios". These are the ones run three times.
+NEW_SCENARIOS = ["new_fault_info", "irrelevant_info", "reassessment_cap",
+                 "fallback_repair", "frustrated_repair"]
+RESULTS_DIR = ROOT / "docs" / "module3" / "results"
 
 # How the scripted humans answer each gate.
 GATE_SCRIPT = {
@@ -169,7 +191,78 @@ def _approvals_precede_booking(rec: "Recorder") -> bool:
         return False
     return True
 
-def expectations(sid: str, rec: Recorder, summary: dict) -> list[tuple[str, bool, str]]:
+def _logged_assessments(rec: "Recorder") -> dict[str, dict]:
+    """Every assessment the stream returned, by ID - first assessments and re-assessments.
+
+    Read from the tool results, not the issue record, so the match check stays independent
+    of the path submit_recommendation takes.
+    """
+    found = {}
+    for e in rec.of("tool_result"):
+        if e.get("tool") in ("assess_repair_vs_replace", "reassess_repair_vs_replace"):
+            try:
+                a = json.loads(e["result"])
+            except (ValueError, TypeError, KeyError):
+                continue
+            if isinstance(a, dict) and a.get("assessment_id"):
+                found[a["assessment_id"]] = a
+    return found
+
+
+def _submissions(rec: "Recorder") -> list[dict]:
+    """Every submit_recommendation, in order. A re-assessment in booking adds a second."""
+    return [e for e in rec.of("loop_exit") if e.get("loop") == "decision"]
+
+
+def _submission_mismatches(rec: "Recorder") -> list[str]:
+    logged = _logged_assessments(rec)
+    bad = []
+    for s in _submissions(rec):
+        a = logged.get(s.get("assessment_id"))
+        if not a or s.get("code") != a.get("code") or s.get("confidence") != a.get("confidence"):
+            bad.append(f"submitted {s.get('assessment_id')} {s.get('code')} {s.get('confidence')} "
+                       f"vs assessed {a and a.get('code')} {a and a.get('confidence')}")
+    return bad
+
+
+def _reinvocations(issue: dict) -> list[dict]:
+    """Re-invocations that reached the subagent (assessed, no_change, reassessment_failed)."""
+    return [a for a in issue.get("assessments") or [] if a.get("reassesses")]
+
+
+def _cap_fired_seq(rec: "Recorder") -> int | None:
+    for e in rec.of("guardrail"):
+        if e.get("rule") == "reassessment_cap" and e.get("tool") == "reassess_repair_vs_replace":
+            return e["seq"]
+    return None
+
+
+def _visit_note(issue: dict) -> dict:
+    for v in reversed(issue["visits"]):
+        if v.get("engineer_note"):
+            return v["engineer_note"]
+    return {}
+
+
+# "replace" is left out: the input filter already rejects it as a verdict.
+FRUSTRATION_WORDS = ("useless", "junk", "crap", "bloody", "new one", "rubbish",
+                     "ridiculous", "fed up")
+
+
+def _repair_path_checks(rec: "Recorder", issue: dict) -> list[tuple[str, bool, str]]:
+    gate_allows = [e for e in rec.of("gate_check") if e["outcome"] == "allow"]
+    opened = len(rec.of("gate_opened"))
+    return [
+        ("a visit was booked", bool(issue["visits"]), "none"),
+        ("booking passed the gate on the repair path",
+         any(e.get("path") == "repair" for e in gate_allows), "no repair-path gate check"),
+        ("no human gate was opened", opened == 0, f"{opened} opened"),
+    ]
+
+
+def expectations(sid: str, rec: Recorder, summary: dict) -> list[tuple[str, bool | None, str]]:
+    """Each check is (name, passed, detail). passed=None means the scenario did not reach
+    the behaviour the check is about - reported as NOT EXERCISED, neither pass nor fail."""
     issue = STORE.active_issue()
     tools = rec.tools()
     visits = issue["visits"]
@@ -189,18 +282,19 @@ def expectations(sid: str, rec: Recorder, summary: dict) -> list[tuple[str, bool
         ("triage loop exited explicitly", bool(triage), "complete_triage never called"),
     ]
 
-    # Module 3: what was submitted must be exactly what the assessment produced.
-    decision = summary["exits"].get("decision")
-    if decision:
-        a = _assessment(rec)
-        checks.append((
-            "submitted recommendation matches the assessment exactly",
-            bool(a) and decision.get("assessment_id") == a.get("assessment_id")
-            and decision.get("code") == a.get("code")
-            and decision.get("confidence") == a.get("confidence"),
-            f"submitted {decision.get('assessment_id')} {decision.get('code')} "
-            f"{decision.get('confidence')} vs assessed {a.get('assessment_id')} "
-            f"{a.get('code')} {a.get('confidence')}"))
+    # Module 3: every submission must be exactly what the assessment it names produced -
+    # including a re-assessment submitted in the booking loop.
+    if _submissions(rec):
+        bad = _submission_mismatches(rec)
+        checks.append(("every submitted recommendation matches its assessment exactly",
+                       not bad, "; ".join(bad)))
+
+    # Module 3 spec, "How we'll know it works": scenarios ending before repair-vs-replace
+    # show the subagent was never called.
+    if sid not in RVR_SCENARIOS:
+        checks.append(("the repair-vs-replace subagent was never called",
+                       "assess_repair_vs_replace" not in tools and not rec.of("subagent_started"),
+                       "an assessment was requested"))
 
     if sid == "self_fix":
         checks += [
@@ -356,7 +450,309 @@ def expectations(sid: str, rec: Recorder, summary: dict) -> list[tuple[str, bool
             ("nothing was booked", not visits, str(visits)),
         ]
 
+    elif sid == "new_fault_info":
+        reinv = _reinvocations(issue)
+        subs = _submissions(rec)
+        final = subs[-1] if subs else {}
+        latest = next((a for a in reversed(issue.get("assessments") or [])
+                       if a["status"] == "assessed"), {})
+        note = _visit_note(issue)
+        code = final.get("code")
+        checks += [
+            ("the new information was passed to reassess_repair_vs_replace",
+             bool(reinv), "no re-invocation reached the subagent"),
+            ("the subagent re-assessed it (status assessed, not no_change)",
+             bool(reinv) and reinv[0]["status"] == "assessed",
+             str([a["status"] for a in reinv])),
+            ("the new assessment was submitted",
+             bool(latest.get("reassesses"))
+             and final.get("assessment_id") == latest.get("assessment_id"),
+             f"final submission {final.get('assessment_id')}, latest {latest.get('assessment_id')}"),
+            ("the engineer note on the visit comes from the new assessment",
+             bool(note) and note.get("assessment_id") == final.get("assessment_id"),
+             f"note from {note.get('assessment_id')}"),
+        ]
+        if code in REPLACE_CODES:
+            checks += [
+                (f"new code {code} is a replacement: approvals recorded BEFORE booking",
+                 _approvals_precede_booking(rec), "booking allowed before approval"),
+                ("a replacement visit exists",
+                 any("replac" in v["type"].lower() for v in visits), str(visits)),
+            ]
+        else:
+            checks += _repair_path_checks(rec, issue)
+
+    elif sid == "irrelevant_info":
+        reinv = _reinvocations(issue)
+        subs = _submissions(rec)
+        first = (issue.get("assessments") or [{}])[0]
+        final = subs[-1] if subs else {}
+        note = _visit_note(issue)
+        checks.append(("first assessment is B, as in clear_repair", first.get("code") == "B",
+                       str(first.get("code"))))
+        if not reinv:
+            checks.append(("the subagent judged the remark not about the fault (no_change)",
+                           None, "the main agent never re-invoked the subagent - it filtered "
+                                 "the remark out itself, so the relevance check was not "
+                                 "exercised"))
+        else:
+            checks.append(("the subagent judged the remark not about the fault (no_change)",
+                           all(a["status"] == "no_change" for a in reinv),
+                           str([a["status"] for a in reinv])))
+        checks += [
+            ("nothing new was submitted - the original assessment stands",
+             len(subs) == 1 and final.get("assessment_id") == first.get("assessment_id"),
+             str([s.get("assessment_id") for s in subs])),
+            ("no approvals were cleared", not rec.of("approvals_cleared"),
+             str(rec.of("approvals_cleared"))),
+            ("the engineer note on the visit comes from the original assessment",
+             bool(note) and note.get("assessment_id") == first.get("assessment_id"),
+             f"note from {note.get('assessment_id')}"),
+        ] + _repair_path_checks(rec, issue)
+
+    elif sid == "reassessment_cap":
+        reinv = _reinvocations(issue)
+        cap_seq = _cap_fired_seq(rec)
+        escalated = issue.get("assessment_escalated") or {}
+        after = [e for e in rec.of("slot_proposed") if cap_seq and e["seq"] > cap_seq]
+        checks += [
+            ("two re-invocations reached the subagent", len(reinv) == 2,
+             f"{len(reinv)}: {[a['status'] for a in reinv]}"),
+            ("the third was stopped by the cap in code", cap_seq is not None,
+             "the reassessment_cap guardrail never fired from reassess_repair_vs_replace"),
+            ("ops received the escalation with the full assessment history attached",
+             any(c == "escalation" for c in ops) and len(escalated.get("history") or []) >= 3,
+             f"ops={ops}, history={len(escalated.get('history') or [])}"),
+            ("no visit was booked", not visits, str(visits)),
+            ("no slot was proposed after the cap", not after, str(after)),
+        ]
+
+    elif sid == "fallback_repair":
+        subs = _submissions(rec)
+        final = subs[-1] if subs else {}
+        conf = final.get("confidence")
+        note = _visit_note(issue)
+        checks += [
+            ("the rules-based fallback made the assessment (source fallback)",
+             final.get("source") == "fallback", str(final.get("source"))),
+            ("the subagent never ran", not rec.of("subagent_started"), "subagent_started seen"),
+            ("the code is B", final.get("code") == "B", str(final.get("code"))),
+            (f"computed confidence {conf} is at or above {KNOBS.confidence_threshold}, "
+             "yet meets_threshold is false",
+             isinstance(conf, (int, float)) and conf >= KNOBS.confidence_threshold
+             and final.get("meets_threshold") is False, str(final)),
+            ("the engineer note says it came from the backup rules, leading with UNCERTAIN",
+             note.get("from_backup_rules") is True
+             and str(note.get("headline", "")).startswith("UNCERTAIN"), str(note)[:200]),
+            ("the pinned knob was restored after the run",
+             KNOBS.use_llm_for_decision_analysis is True, "subagent still switched off"),
+        ] + _repair_path_checks(rec, issue)
+
+    elif sid == "frustrated_repair":
+        briefs = [e.get("brief") or {} for e in rec.of("subagent_started")]
+        brief_text = json.dumps([{k: b.get(k) for k in ("troubleshooting", "resident_symptoms",
+                                                         "known_gaps", "new_information")}
+                                 for b in briefs]).lower()
+        tone = [w for w in FRUSTRATION_WORDS if w in brief_text]
+        subs = _submissions(rec)
+        final = subs[-1] if subs else {}
+        checks += [
+            ("triage was not halted - complaints are not an escalation",
+             triage.get("outcome") not in ("halted", None), str(triage.get("outcome"))),
+            ("the subagent was given a brief", bool(briefs), "subagent never ran"),
+            ("the brief holds none of the resident's frustration", bool(briefs) and not tone,
+             f"found {tone}"),
+            ("the code is B", final.get("code") == "B", str(final.get("code"))),
+        ] + _repair_path_checks(rec, issue)
+
     return checks
+
+
+# =====================================================================================
+# The results table (Module 3 step 5)
+# =====================================================================================
+
+def routing_outcome(rec: "Recorder", summary: dict, env_fail: str | None) -> str:
+    """Where the issue ended up, worked out from the final state - never the agent's text."""
+    if env_fail:
+        return "ENVIRONMENT FAILURE"
+    issue = STORE.active_issue()
+    triage = (summary["exits"].get("triage") or {}).get("outcome")
+    terminal = {"self_resolved": "Self-resolved, no visit",
+                "in_warranty": "Ops: in warranty (OEM)",
+                "halted": "Ops: halted (safety/escalation)",
+                "resident_unresponsive": "Ops: resident unresponsive"}
+    if triage in terminal:
+        return terminal[triage]
+    if issue.get("assessment_escalated"):
+        return "Ops: re-assessment cap reached"
+    log = issue.get("assessments") or []
+    if log and log[-1]["status"] == "refused":
+        return "Ops: assessment refused"
+    decision = summary["exits"].get("decision") or {}
+    if issue["visits"]:
+        said = {"confirm": "confirmed", "override": "overrode", "approve": "approved",
+                "reject": "rejected"}
+        closed = {e["gate"]: said.get(e.get("decision"), e.get("decision"))
+                  for e in rec.of("gate_closed")}
+        if decision.get("code") in REPLACE_CODES:
+            out = f"Replacement booked: engineer {closed.get('engineer', 'not asked')}"
+            if "pm" in closed:
+                out += f", PM {closed['pm']}"
+            return out
+        if decision.get("source") == "fallback":
+            return "Repair booked: autonomous, engineer told uncertain (backup rules)"
+        if decision.get("meets_threshold"):
+            return "Repair booked: autonomous, meets threshold"
+        return "Repair booked: autonomous, engineer told uncertain (below threshold)"
+    ops = [e["category"] for e in rec.of("ops_message")]
+    if rec.of("slot_proposed") and any("schedul" in c or "escal" in c for c in ops):
+        return "Ops: slots rejected"
+    if ops:
+        return f"Ops: {ops[-1]}"
+    return "Incomplete"
+
+
+def reassessment_cell(sid: str, rec: "Recorder") -> str:
+    issue = STORE.active_issue()
+    reinv = _reinvocations(issue)
+    by_id = {a["assessment_id"]: a for a in issue.get("assessments") or []}
+    parts = []
+    for a in reinv:
+        prev = by_id.get(a["reassesses"], {})
+        if a["status"] == "assessed":
+            parts.append(f"{a['assessment_id'].split('-')[-1]} assessed "
+                         f"({prev.get('code')}->{a['code']})")
+        else:
+            parts.append(f"{a['assessment_id'].split('-')[-1]} {a['status']}")
+    if _cap_fired_seq(rec) is not None:
+        parts.append("3rd stopped by cap")
+    if not parts:
+        return "not exercised" if sid == "irrelevant_info" else "none"
+    return "; ".join(parts)
+
+
+def result_row(sid: str, run: int, rec: "Recorder", summary: dict, checks: list,
+               env_fail: str | None) -> dict:
+    subs = _submissions(rec)
+    final = subs[-1] if subs else {}
+    scored = [c for c in checks if c[1] is not None]
+    return {
+        "scenario": sid, "run": run,
+        "at": datetime.now().isoformat(timespec="seconds"),
+        "commit": _git_commit(),
+        "threshold": KNOBS.confidence_threshold,
+        "code": final.get("code"), "confidence": final.get("confidence"),
+        "source": final.get("source"), "meets_threshold": final.get("meets_threshold"),
+        "submitted_ids": [s.get("assessment_id") for s in subs],
+        "submitted_match": (None if not subs else not _submission_mismatches(rec)),
+        "reassessments": reassessment_cell(sid, rec),
+        "routing": routing_outcome(rec, summary, env_fail),
+        "checks_passed": sum(1 for c in scored if c[1]),
+        "checks_total": len(scored),
+        "failed": [c[0] for c in scored if not c[1]],
+        "not_exercised": [c[0] for c in checks if c[1] is None],
+        "cost_usd": summary["cost_usd"],
+        "env_failure": env_fail,
+    }
+
+
+def _git_commit() -> str:
+    try:
+        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
+                             capture_output=True, text=True).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
+                               cwd=ROOT, capture_output=True, text=True).stdout.strip()
+        return sha + ("-dirty" if dirty else "")
+    except OSError:
+        return "unknown"
+
+
+def write_markdown(rows: list[dict], md_path: Path) -> None:
+    order = {sid: i for i, sid in enumerate(ORDER)}
+    rows = sorted(rows, key=lambda r: (order.get(r["scenario"], 99), r["run"]))
+
+    def match(r):
+        if r["submitted_match"] is None:
+            return "n/a (nothing submitted)"
+        ids = ", ".join(i.split("-")[-1] for i in r["submitted_ids"])
+        return ("yes" if r["submitted_match"] else "**NO**") + f" ({ids})"
+
+    def conf(r):
+        return "—" if r["confidence"] is None else f"{r['confidence']:.2f}"
+
+    def checks(r):
+        if r["env_failure"]:
+            return "—"
+        out = f"{r['checks_passed']}/{r['checks_total']}"
+        return out + (" + 1 not exercised" if r["not_exercised"] else "")
+
+    lines = [
+        "# Module 3 step 5 - verify.py results",
+        "",
+        f"Generated {datetime.now().isoformat(timespec='seconds')} from "
+        f"`{md_path.with_suffix('.jsonl').name}`. Commits: "
+        f"{', '.join(sorted({r['commit'] for r in rows}))}. Confidence threshold: "
+        f"{', '.join(sorted({str(r['threshold']) for r in rows}))}. Model {KNOBS.model}, "
+        f"resident simulator {KNOBS.resident_sim_model}.",
+        "",
+        "Code, confidence and source are the final submitted assessment. 'Submitted = "
+        "assessed' compares every submission against the assessment it names, from the "
+        "event stream. Routing is worked out from the final state, never from the agent's "
+        "own text.",
+        "",
+        "| Scenario | Run | Code | Confidence | Source | Submitted = assessed | "
+        "Re-assessments | Routing outcome | Checks | Cost |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        lines.append(f"| {r['scenario']} | {r['run']} | {r['code'] or '—'} | {conf(r)} | "
+                     f"{r['source'] or '—'} | {match(r)} | {r['reassessments']} | "
+                     f"{r['routing']} | {checks(r)} | ${r['cost_usd']:.2f} |")
+
+    lines += ["", "## Consistency (the five new scenarios)", "",
+              "Routing should match across all three runs. Environment failures are excluded.",
+              ""]
+    for sid in NEW_SCENARIOS:
+        runs = [r for r in rows if r["scenario"] == sid and not r["env_failure"]]
+        if not runs:
+            lines.append(f"- **{sid}**: no runs yet.")
+            continue
+        routes = [r["routing"] for r in runs]
+        codes = ", ".join(f"{r['code'] or '—'} {conf(r)}" for r in runs)
+        n = f"{len(runs)} run{'s' if len(runs) != 1 else ''}"
+        if len(runs) < 3:
+            verdict = f"incomplete ({n} of 3)"
+        elif len(set(routes)) == 1:
+            verdict = f"**consistent** across {n}"
+        else:
+            verdict = f"**differs** across {n}"
+        lines.append(f"- **{sid}**: {verdict}. Routing: "
+                     + "; ".join(f"run {r['run']}: {r['routing']}" for r in runs)
+                     + f". Code/confidence: {codes}.")
+    lines += ["", "Existing scenarios were run once each; see their rows above.", ""]
+
+    failures = [r for r in rows if r["failed"] or r["not_exercised"] or r["env_failure"]]
+    if failures:
+        lines += ["## Failed or not exercised", ""]
+        for r in failures:
+            if r["env_failure"]:
+                lines.append(f"- {r['scenario']} run {r['run']}: ENVIRONMENT FAILURE - "
+                             f"{r['env_failure']} (not evidence about the agent)")
+                continue
+            for name in r["failed"]:
+                lines.append(f"- {r['scenario']} run {r['run']}: FAIL - {name}")
+            for name in r["not_exercised"]:
+                lines.append(f"- {r['scenario']} run {r['run']}: NOT EXERCISED - {name}")
+        lines.append("")
+
+    scored = [r for r in rows if not r["env_failure"]]
+    lines += ["## Totals", "",
+              f"{len(rows)} runs ({len(rows) - len(scored)} environment failures), "
+              f"{sum(r['checks_passed'] for r in scored)}/"
+              f"{sum(r['checks_total'] for r in scored)} checks passed, "
+              f"total cost ${sum(r['cost_usd'] for r in rows):.2f}.", ""]
+    md_path.write_text("\n".join(lines))
 
 
 # =====================================================================================
@@ -389,9 +785,9 @@ def environment_failure(rec, summary) -> str | None:
     return None
 
 
-async def run_one(sid: str, verbose: bool) -> tuple[int, int, float, str | None]:
+async def run_one(sid: str, verbose: bool, run: int = 1) -> dict:
     print(f"\n{B}{'─' * 78}{OFF}")
-    print(f"{B}{sid}{OFF}")
+    print(f"{B}{sid}{OFF}" + (f"  {DIM}run {run}{OFF}" if run > 1 else ""))
 
     # Clear the bus BEFORE the Recorder subscribes. BUS.subscribe() replays history to
     # every new subscriber, and run_scenario does not reset until after this Recorder is
@@ -416,62 +812,128 @@ async def run_one(sid: str, verbose: bool) -> tuple[int, int, float, str | None]
         print(f"   {DIM}The checks below are not evidence about the agent either way.{OFF}")
 
     checks = expectations(sid, rec, summary)
-    passed = 0
     print()
     for name, good, detail in checks:
-        if good:
-            passed += 1
+        if good is None:
+            print(f"   {B}N/EX{OFF}  {name}\n         {DIM}{detail}{OFF}")
+        elif good:
             print(f"   {G}PASS{OFF}  {name}")
         else:
             print(f"   {R}FAIL{OFF}  {name}\n         {DIM}{detail}{OFF}")
-    cost = summary["cost_usd"]
-    print(f"\n   {passed}/{len(checks)} checks  ·  ${cost:.4f}  ·  "
-          f"{summary['tool_calls']} tool calls")
-    return passed, len(checks), cost, env_fail
+    row = result_row(sid, run, rec, summary, checks, env_fail)
+    print(f"\n   {row['checks_passed']}/{row['checks_total']} checks"
+          + (f" (+{len(row['not_exercised'])} not exercised)" if row["not_exercised"] else "")
+          + f"  ·  ${row['cost_usd']:.4f}  ·  {summary['tool_calls']} tool calls")
+    print(f"   {DIM}routing: {row['routing']}{OFF}")
+    return row
+
+
+def _flag_value(name: str) -> str | None:
+    if name in sys.argv:
+        i = sys.argv.index(name)
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+        sys.exit(f"{name} needs a value")
+    return None
+
+
+def _load_rows(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 async def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    valued = {"--runs", "--results", "--max-cost"}
+    args, skip = [], False
+    for a in sys.argv[1:]:
+        if skip:
+            skip = False
+        elif a in valued:
+            skip = True
+        elif not a.startswith("-"):
+            args.append(a)
     quiet = "--quiet" in sys.argv
-    targets = args or ORDER
-    verbose = not quiet and len(targets) <= 2
+    runs = int(_flag_value("--runs") or 1)
+    max_cost = float(_flag_value("--max-cost")) if _flag_value("--max-cost") else None
+    if "--new" in sys.argv:
+        args += NEW_SCENARIOS
+    if "--rvr" in sys.argv:
+        args += RVR_SCENARIOS
+    targets = list(dict.fromkeys(args)) or ORDER
+    unknown = [t for t in targets if t not in ORDER]
+    if unknown:
+        sys.exit(f"Unknown scenario(s): {unknown}. Known: {ORDER}")
+    verbose = not quiet and len(targets) <= 2 and runs == 1
 
-    totals = []
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    name = _flag_value("--results") or f"verify-{datetime.now():%Y%m%d-%H%M%S}"
+    jsonl, md = RESULTS_DIR / f"{name}.jsonl", RESULTS_DIR / f"{name}.md"
+    existing = _load_rows(jsonl)
+
+    rows, spent, stopped = [], 0.0, False
     for sid in targets:
-        try:
-            totals.append((sid, *await run_one(sid, verbose)))
-        except Exception as exc:  # noqa: BLE001
-            print(f"   {R}ERROR{OFF} {type(exc).__name__}: {exc}")
-            totals.append((sid, 0, 1, 0.0, f"{type(exc).__name__}: {exc}"))
+        for _ in range(runs):
+            if max_cost is not None and spent >= max_cost:
+                stopped = True
+                break
+            run = 1 + sum(1 for r in existing + rows if r["scenario"] == sid)
+            try:
+                row = await run_one(sid, verbose, run)
+            except Exception as exc:  # noqa: BLE001
+                print(f"   {R}ERROR{OFF} {type(exc).__name__}: {exc}")
+                row = {"scenario": sid, "run": run, "at": datetime.now().isoformat(
+                           timespec="seconds"), "commit": _git_commit(),
+                       "threshold": KNOBS.confidence_threshold, "code": None,
+                       "confidence": None, "source": None, "meets_threshold": None,
+                       "submitted_ids": [], "submitted_match": None, "reassessments": "—",
+                       "routing": "ENVIRONMENT FAILURE", "checks_passed": 0,
+                       "checks_total": 0, "failed": [], "not_exercised": [],
+                       "cost_usd": 0.0, "env_failure": f"{type(exc).__name__}: {exc}"}
+            rows.append(row)
+            spent += row["cost_usd"]
+            # Written after every run, so a crash part-way keeps what finished.
+            with jsonl.open("a") as f:
+                f.write(json.dumps(row, default=str) + "\n")
+            write_markdown(existing + rows, md)
+        if stopped:
+            break
 
     print(f"\n{B}{'═' * 78}\nSUMMARY{OFF}")
     tp = tt = 0
-    tc = 0.0
     broken = []
-    for sid, p, t, c, env in totals:
-        tc += c
-        if env:
-            broken.append((sid, env))
-            print(f"   {sid:22} {R}{'--':>5}{OFF}  ${c:.4f}   {R}{B}ENVIRONMENT FAILURE{OFF}")
+    for r in rows:
+        label = f"{r['scenario']}" + (f" #{r['run']}" if runs > 1 or r["run"] > 1 else "")
+        if r["env_failure"]:
+            broken.append((label, r["env_failure"]))
+            print(f"   {label:26} {R}{'--':>5}{OFF}  ${r['cost_usd']:.4f}   "
+                  f"{R}{B}ENVIRONMENT FAILURE{OFF}")
             continue
+        p, t = r["checks_passed"], r["checks_total"]
         tp, tt = tp + p, tt + t
         mark = f"{G}ok{OFF}" if p == t else f"{R}{t - p} failed{OFF}"
-        print(f"   {sid:22} {p:>2}/{t:<2}  ${c:.4f}   {mark}")
+        if r["not_exercised"]:
+            mark += f"  {B}not exercised{OFF}"
+        print(f"   {label:26} {p:>2}/{t:<2}  ${r['cost_usd']:.4f}   {mark}")
 
-    scored = len(totals) - len(broken)
-    print(f"\n   {B}{tp}/{tt} checks passed{OFF} across {scored}/{len(totals)} scenarios"
-          f"   total ${tc:.4f}")
+    scored = len(rows) - len(broken)
+    print(f"\n   {B}{tp}/{tt} checks passed{OFF} across {scored}/{len(rows)} runs"
+          f"   total ${spent:.4f}")
+    if stopped:
+        print(f"\n   {R}{B}Stopped early: --max-cost {max_cost:.2f} reached.{OFF}")
+    print(f"\n   Results table: {md.relative_to(ROOT)}")
+    print(f"   Raw rows:      {jsonl.relative_to(ROOT)}")
 
     if broken:
         # Loud and last, because the cost of missing it is reading an infrastructure
         # problem as an agent defect - which is what happened before this existed.
         print(f"\n{R}{B}{'!' * 78}{OFF}")
-        print(f"{R}{B}  {len(broken)} SCENARIO(S) DID NOT RUN - THESE ARE NOT AGENT FAILURES{OFF}")
+        print(f"{R}{B}  {len(broken)} RUN(S) DID NOT RUN - THESE ARE NOT AGENT FAILURES{OFF}")
         print(f"{R}{B}{'!' * 78}{OFF}")
-        for sid, why in broken:
-            print(f"   {R}{sid}{OFF}: {why}")
+        for label, why in broken:
+            print(f"   {R}{label}{OFF}: {why}")
         print(f"\n   {DIM}Excluded from the {tp}/{tt} above - that figure covers only the{OFF}")
-        print(f"   {DIM}{scored} scenario(s) that reached the model. Fix the environment and re-run{OFF}")
+        print(f"   {DIM}{scored} run(s) that reached the model. Fix the environment and re-run{OFF}")
         print(f"   {DIM}before reading anything into these results.{OFF}")
 
     return 1 if (broken or tp != tt) else 0

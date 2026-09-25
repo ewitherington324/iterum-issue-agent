@@ -116,6 +116,18 @@ def _triage_prompt(s) -> str:
 async def run_scenario(scenario_id: str, auto_play: bool = True) -> dict:
     BUS.reset()
     scenario = STORE.load_scenario(scenario_id)
+    # A scenario can pin knobs it depends on (fallback_repair switches the subagent off).
+    # They hold for this run only; the dials go back to where they were afterwards.
+    pinned = scenario.get("knobs") or {}
+    restore = {k: getattr(KNOBS, k) for k in pinned if hasattr(KNOBS, k)}
+    KNOBS.update(pinned)
+    try:
+        return await _run(scenario, scenario_id, auto_play)
+    finally:
+        KNOBS.update(restore)
+
+
+async def _run(scenario: dict, scenario_id: str, auto_play: bool) -> dict:
     s = session.set_current(session.IssueSession(scenario))
     s.auto_play = auto_play
 

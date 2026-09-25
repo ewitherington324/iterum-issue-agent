@@ -58,8 +58,8 @@ own instructions (`agent/prompts.py`) so they apply from the first message.
 | `agent/trace.py` | Guardrails (e.g. the warranty block) and the decision log |
 | `agent/prompts.py` | Main agent instructions, including the escalation rules |
 | `skills/` | The three Module 2 skills + ten appliance fault references |
-| `scenarios/` | The 8 test cases |
-| `selftest.py` | 183 quick checks, free, no API key |
+| `scenarios/` | The 13 test cases (8 from Module 2, 5 added in Module 3 step 5) |
+| `selftest.py` | 198 quick checks, free, no API key |
 | `verify.py` | Runs scenarios against the real model — costs money |
 | `static/`, `server.py` | The browser demo |
 | `docs/` | PRD, this map, and `module2/` (submitted write-up, evidence, old prompts) |
@@ -78,7 +78,7 @@ Most relevant to Module 3 first.
 1. **The main agent can overwrite the assessment.** In the cracked-hob run, the repair-vs-replace
    call correctly capped confidence at 0.6 (no photo). The main agent then submitted 0.78, which
    crossed the threshold. Nothing checks that the two agree (`docs/module2/verification.md` §4.3).
-2. **Confidence threshold doesn't match the PRD.** The PRD says 0.7; the code uses 0.75.
+2. **Confidence threshold doesn't match the PRD.** Resolved in Module 3 step 5: the code now uses the PRD's 0.7.
 3. **Photos can't be supplied.** Nothing in the system handles them, so the "crack confirmed by
    photo" path in the skill can't be reached.
 4. **No guardrail has fired in a live run.** Routing was correct every time, so the backstops are untested.

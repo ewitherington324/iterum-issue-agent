@@ -13,8 +13,9 @@ Module 3 work follows docs/module3/SUBAGENT_SPEC.md. If the code and the spec di
 
 ```bash
 ./run.sh                              # http://localhost:8000
-.venv/bin/python selftest.py          # 183 checks, no API key, ~1s — use this constantly
-.venv/bin/python verify.py            # all 8 scenarios against the real model (~$3)
+.venv/bin/python selftest.py          # 198 checks, no API key, ~1s — use this constantly
+.venv/bin/python verify.py            # all 13 scenarios against the real model (~$8)
+.venv/bin/python verify.py --new --runs 2 --results NAME   # repeat runs; table in docs/module3/results/
 .venv/bin/python verify.py self_fix   # one scenario, verbose trace (~$0.15–0.70)
 ```
 
@@ -97,7 +98,7 @@ server.py           FastAPI: SSE stream + the human-actor endpoints
 docs/               PRD, project map, and docs/module2/ (submitted write-up, evidence,
                     pre-skills baseline prompts)
 static/             the three-pane UI (vanilla JS, roadmap-green palette)
-scenarios/*.json    the 8 test cases; "order" drives both the UI dropdown and verify.py
+scenarios/*.json    the 13 test cases; "order" drives both the UI dropdown and verify.py
 ```
 
 **Generated — don't hand-edit:** `data/store.json` (rebuilt per scenario run),
@@ -134,8 +135,8 @@ before publishing anything from this repo anywhere public.
 
 - §5.1's slot rule permits same-day booking when parts are in stock, and does so in practice.
   Implemented as written rather than silently fixed; a real v1 needs a minimum notice period.
-- The PM cost threshold (£400), the engineer channel, and what underlies the 75% confidence
-  figure are all unresolved in the PRD and exposed as UI dials rather than decided here.
+- The PM cost threshold (£400), the engineer channel, and what underlies the 0.7 confidence
+  threshold are all unresolved in the PRD and exposed as UI dials rather than decided here.
 - The LLM path self-reports confidence; the heuristic computes it from distance to its
   decision boundaries. These are different quantities — `confidence_basis` records which.
 - Six of the ten appliance reference files are keyed by real `label_slug` values. The other

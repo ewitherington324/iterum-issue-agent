@@ -1,0 +1,35 @@
+{
+  "id": "frustrated_repair",
+  "order": 13,
+  "title": "Frustrated resident, repair symptoms",
+  "summary": "Dishwasher door drops open - a broken hinge spring, a cheap repair on an appliance just out of warranty. The resident is angry and insists it is junk. Tone must not reach the subagent or move the code.",
+  "expected": "Code B. The brief the subagent received holds only symptom quotes - none of the resident's frustration or demands for a new machine. Triage is not halted (complaints are not an escalation). The visit is booked on the repair path with no engineer gate.",
+  "issue": {
+    "id": "ISS-4413",
+    "appliance_id": "app_001",
+    "resident_id": "res_001",
+    "property_id": "prop_bmy",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Dishwasher door will not stay up. Resident reports it drops open on its own.",
+    "fault_slug_reported": "dishwasher_door_issue",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 85.0,
+    "estimated_replacement_cost": 429.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "Aisha Bello",
+    "ground_truth": "One of the door hinge springs has snapped. When she lets go of the door it drops straight down and slams fully open instead of easing down. There was a twanging sound the first time it happened, three days ago. The door still closes and latches properly, the dishwasher washes and drains fine once it is shut, and there is no leak. There is a loose bit of thin cable hanging down at the bottom left side of the door.",
+    "behaviour": "Fed up and sarcastic. The dishwasher went out of warranty three months ago and she is convinced it is junk. She swears mildly (bloody, crap), calls it 'completely useless' and 'a piece of junk', and says more than once that she just wants a new one. Despite that she answers questions accurately and will look at the door and describe what she sees if asked. She does NOT ask to speak to a person or a manager, and never mentions rent, compensation, refunds or who should pay. Accepts the first appointment offered, grudgingly."
+  }
+}

@@ -38,8 +38,8 @@ Python 3.10+. The first run creates a virtualenv and installs dependencies. A fu
 costs roughly $0.15–$0.60 in API usage.
 
 ```bash
-.venv/bin/python selftest.py    # 44 checks, no API key needed
-.venv/bin/python verify.py      # runs all 8 scenarios and checks the outcomes
+.venv/bin/python selftest.py    # 198 checks, no API key needed
+.venv/bin/python verify.py      # runs all 13 scenarios and checks the outcomes
 ```
 
 ---
@@ -184,7 +184,7 @@ selection here is the deterministic v1 rule from §5.1.
 
 - What number the PM cost-approval threshold should actually be. £400 is a placeholder.
 - Whether the engineer notification channel is WhatsApp or Airtable — the demo simulates both.
-- What underlies the 75% confidence threshold. The two paths produce confidence by genuinely
+- What underlies the 0.7 confidence threshold. The two paths produce confidence by genuinely
   different means, and the prototype shows that rather than papering over it.
 
 **One the prototype surfaced that the PRD doesn't mention:** §5.1's slot rule is

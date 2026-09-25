@@ -448,7 +448,7 @@ const KNOB_SPECS = [
     hint: "PRD open question — needs a real number. Drop it below the replacement cost and the PM gate appears." },
   { key: "confidence_threshold", label: "Confidence threshold", min: 0.3, max: 1, step: 0.05,
     fmt: (v) => Number(v).toFixed(2),
-    hint: "PRD assumes 0.75, but what underlies the percentage is undecided." },
+    hint: "PRD working value 0.7, but what underlies the percentage is undecided." },
   { key: "max_slot_rejections", label: "Slot rejections before ops", min: 1, max: 6, step: 1,
     fmt: (v) => String(v), hint: "PRD 5.1. Enforced in the scheduling tool, not just asked for." },
 ];
