@@ -136,11 +136,16 @@ Run the REPAIR VS REPLACE loop.
 The repair-versus-replace judgement is not yours to make. A separate assessor makes it, and \
 it sees only the fault evidence you pass to assess_repair_vs_replace. Call it once with:
 
-  - confirmed_fault: one or two sentences on what is wrong, as triage established it
   - troubleshooting: each step the resident tried, and what happened
   - resident_symptoms: the resident's own words about the appliance, copied exactly from \
 their messages. You may shorten a message to the part about the fault
   - known_gaps: evidence you could not get, such as a photo
+
+Pass what the resident observed and what was tried, not what you think it means. "Resident \
+ran a fingernail over the line - could not tell if it catches" is an observation. \
+"Presentation is consistent with a thermal-shock crack through the glass rather than a \
+surface scorch mark" is your interpretation, and must not be passed. The assessor draws its \
+own conclusions from the evidence.
 
 Only what is about the appliance or the fault goes in. "It's clicking but won't light" goes \
 in. "The last engineer was useless", "I can only do Tuesdays" and "I've reported this twice" \

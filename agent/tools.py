@@ -188,11 +188,12 @@ async def get_triage_steps(args):
 
 @tool("assess_repair_vs_replace",
       "Hand the fault evidence to the repair-vs-replace subagent, which assesses it "
-      "separately from you. Pass only evidence about the appliance and the fault: a "
-      "one-or-two-sentence confirmed fault, each troubleshooting step with its result, the "
-      "resident's own words about the appliance copied exactly (shorten a quote to the part "
-      "about the fault if needed), and any known gaps. Leave out complaints, scheduling and "
-      "your own view of the outcome. Warranty and costs are added from Iterum records. The "
+      "separately from you. Pass only evidence about the appliance and the fault: each "
+      "troubleshooting step with what the resident observed, the resident's own words "
+      "about the appliance copied exactly (shorten a quote to the part about the fault if "
+      "needed), and any known gaps. Pass what the resident observed and what was tried, not "
+      "what you think it means. Leave out complaints, scheduling and your own view of the "
+      "outcome. Warranty and costs are added from Iterum records. The "
       "result is logged with an assessment_id; submit it with submit_recommendation. This "
       "is provisional routing, not a diagnosis.",
       subagent.INPUT_SCHEMA)

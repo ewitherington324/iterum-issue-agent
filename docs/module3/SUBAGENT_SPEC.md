@@ -86,11 +86,16 @@ It returns its answer by calling `submit_assessment`, an exit tool rather than a
 Passed by the main agent at the end of triage:
 
 - Issue ID and appliance ID
-- The confirmed fault, in one or two sentences
 - Troubleshooting steps attempted and what happened
 - The resident's **symptom descriptions, verbatim** ("clicking but won't light", "smells of
   burning") — only statements about the appliance or fault
 - Known gaps, e.g. no photo available
+
+No summary of the fault is passed. An earlier "confirmed fault, in one or two sentences"
+input was removed after the first live runs: everything it held was already in the quotes,
+the PM description or the fault category, and the only thing it added was the main agent's
+own interpretation ("consistent with a thermal-shock crack"), which is exactly what the
+subagent must not see.
 
 Supplied by code from Iterum records, not by the main agent:
 

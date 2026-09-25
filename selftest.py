@@ -251,7 +251,6 @@ async def main():
     issue = STORE.active_issue()
     STORE.append_conversation("resident", "It hums when it should pump out, then nothing.")
     fault_args = {"issue_id": issue["id"], "appliance_id": issue["appliance_id"],
-                  "confirmed_fault": "Water stays in the drum after the cycle.",
                   "troubleshooting": [{"step": "Cleaned filter", "result": "No change"}],
                   "resident_symptoms": ["It hums when it should pump out"],
                   "known_gaps": []}
@@ -314,8 +313,6 @@ async def main():
         STORE.append_conversation("resident", line)
     log = STORE.data["conversation_log"]
     good = {"issue_id": issue["id"], "appliance_id": issue["appliance_id"],
-            "confirmed_fault": "The machine does not pump out at the end of the cycle; "
-                               "water stays in the drum.",
             "troubleshooting": [{"step": "Cleaned the filter", "result": "Filter was clean, "
                                  "no change"}],
             "resident_symptoms": ["There's a low humming noise when it should pump out, then "
@@ -337,9 +334,15 @@ async def main():
     for phrase in ["it needs replacing", "just replace it", "it's beyond repair",
                    "not worth fixing", "a write-off", "get a new one"]:
         check(f"verdict phrase caught: {phrase!r}", subagent.verdicts_in(phrase), phrase)
+    check("there is no summary field for the main agent's interpretation",
+          not {"confirmed_fault", "summary", "diagnosis"} & set(schema["properties"]))
     probs = subagent.check_input(issue, dict(good, confirmed_fault=
-        "Drain pump failure; at this age it is not worth repairing."), log)
-    check("the main agent's lean in confirmed_fault is rejected",
+        "Presentation is consistent with a thermal-shock crack through the glass."), log)
+    check("  ...and one passed anyway is rejected", any("Unexpected" in p for p in probs),
+          str(probs))
+    probs = subagent.check_input(issue, dict(good, troubleshooting=[
+        {"step": "Cleaned the filter", "result": "No change, so it is not worth repairing"}]), log)
+    check("the main agent's lean in a troubleshooting result is rejected",
           any("verdict" in p for p in probs), str(probs))
     probs = subagent.check_input(issue, dict(good, resident_symptoms=["it needs replacing"]), log)
     check("a resident's verdict is rejected even though it is verbatim",
@@ -413,7 +416,7 @@ async def main():
     issue = STORE.active_issue()
     STORE.append_conversation("resident", "The fridge is warm and the light is off.")
     wargs = {"issue_id": issue["id"], "appliance_id": issue["appliance_id"],
-             "confirmed_fault": "The fridge is not cooling.", "troubleshooting": [],
+             "troubleshooting": [],
              "resident_symptoms": ["The fridge is warm"], "known_gaps": []}
     check("s.warranty_blocked is not set - the guard must not depend on check_warranty",
           not s.warranty_blocked)

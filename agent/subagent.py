@@ -9,9 +9,12 @@ main agent sees it.
 
 Three things make the input filtered rather than merely requested:
 
-  1. The tool schema. The main agent can pass a confirmed fault, troubleshooting steps and
-     results, verbatim resident quotes and known gaps - nothing else. There is no free-text
-     "findings" field for a lean or a grievance to travel in.
+  1. The tool schema. The main agent can pass troubleshooting steps and results, verbatim
+     resident quotes and known gaps - nothing else. There is no free-text "findings" or
+     summary field for a lean or a grievance to travel in. (A one-line "confirmed fault"
+     summary was dropped after the first live runs: every fact in it was already in the
+     quotes or the PM description, and the only thing it added was the main agent's own
+     reading of the evidence - "consistent with a thermal-shock crack".)
   2. Checks in code (`check_input`). Every quote must appear in a resident message in the
      conversation log, so paraphrase is rejected; a shortened quote passes, which is how a
      grievance is trimmed off a sentence that also carries a symptom. Verdict phrases
@@ -76,23 +79,19 @@ class SubagentError(RuntimeError):
 # Input filter
 # =====================================================================================
 
-INPUT_FIELDS = ("issue_id", "appliance_id", "confirmed_fault", "troubleshooting",
-                "resident_symptoms", "known_gaps")
+INPUT_FIELDS = ("issue_id", "appliance_id", "troubleshooting", "resident_symptoms",
+                "known_gaps")
 
 INPUT_SCHEMA = {
     "type": "object",
     "properties": {
         "issue_id": {"type": "string"},
         "appliance_id": {"type": "string"},
-        "confirmed_fault": {
-            "type": "string",
-            "description": "One or two sentences on what is wrong with the appliance, as "
-                           "triage established it. Describe the fault, not what should "
-                           "happen to the appliance."},
         "troubleshooting": {
             "type": "array",
             "description": "Each troubleshooting step the resident tried, and what "
-                           "happened.",
+                           "happened - what the resident observed, not what you think "
+                           "it means.",
             "items": {"type": "object",
                       "properties": {"step": {"type": "string"},
                                      "result": {"type": "string"}},
@@ -172,12 +171,6 @@ def check_input(issue: dict, args: dict, conversation: list[dict]) -> list[str]:
         problems.append(f"appliance_id must be this issue's appliance, "
                         f"{issue['appliance_id']}.")
 
-    fault = (args.get("confirmed_fault") or "").strip()
-    if not fault:
-        problems.append("confirmed_fault is empty.")
-    elif len(re.findall(r"[.!?]+(?:\s|$)", fault)) > 2:
-        problems.append("confirmed_fault must be one or two sentences.")
-
     quotes = args.get("resident_symptoms") or []
     if not quotes:
         problems.append("resident_symptoms needs at least one quote from the resident.")
@@ -186,8 +179,7 @@ def check_input(issue: dict, args: dict, conversation: list[dict]) -> list[str]:
             problems.append(f"Not found word for word in the resident's messages: {q!r}. "
                             "Copy their exact words, or a shortened part of them.")
 
-    fields = [("confirmed_fault", fault)]
-    fields += [(f"troubleshooting[{i}]", f"{t.get('step', '')} {t.get('result', '')}")
+    fields = [(f"troubleshooting[{i}]", f"{t.get('step', '')} {t.get('result', '')}")
                for i, t in enumerate(args.get("troubleshooting") or [])]
     fields += [("resident_symptoms", q) for q in quotes]
     fields += [("known_gaps", g) for g in args.get("known_gaps") or []]
@@ -257,7 +249,6 @@ def build_brief(issue: dict, appliance: dict, args: dict) -> dict:
         "estimated_replacement_cost": replace,
         "cost_ratio": round(repair / replace, 3) if replace else None,
         "confidence_threshold": KNOBS.confidence_threshold,
-        "confirmed_fault": args["confirmed_fault"].strip(),
         "troubleshooting": [{"step": t["step"], "result": t["result"]}
                             for t in args.get("troubleshooting") or []],
         "resident_symptoms": list(args["resident_symptoms"]),
@@ -283,7 +274,6 @@ def render_brief(b: dict) -> str:
         f"Repair as share of replacement: {ratio}\n"
         f"Confidence threshold currently set to {b['confidence_threshold']:.2f}\n\n"
         f"Logged by the property manager (second-hand):\n  {b['pm_description']}\n\n"
-        f"Confirmed fault, as triage established it:\n  {b['confirmed_fault']}\n\n"
         "Troubleshooting attempted:\n"
         + bullets(f"{t['step']} -> {t['result']}" for t in b["troubleshooting"]) + "\n\n"
         "The resident's own words about the appliance (verbatim):\n"
