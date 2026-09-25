@@ -1,6 +1,6 @@
 # Module 3 step 5 - verify.py results
 
-Generated 2026-09-25T18:07:48 from `step5.jsonl`. Commits: 7a9b1c4, 7a9b1c4-dirty, 893b73d, d87ae41. Confidence threshold: 0.7. Model claude-opus-5, resident simulator claude-haiku-4-5.
+Generated 2026-09-25T19:30:25 from `step5.jsonl`. Commits: 7a9b1c4, 7a9b1c4-dirty, 893b73d, d87ae41. Confidence threshold: 0.7. Model claude-opus-5, resident simulator claude-haiku-4-5.
 
 Code, confidence and source are the final submitted assessment. 'Submitted = assessed' compares every submission against the assessment it names, from the event stream. Routing is worked out from the final state, never from the agent's own text.
 
@@ -34,22 +34,32 @@ Code, confidence and source are the final submitted assessment. 'Submitted = ass
 | fallback_repair | 4 | B | 0.89 | fallback | yes (1) | none | Repair booked: autonomous, engineer told uncertain (backup rules) | 13/13 | $0.44 |
 | fallback_repair | 5 | B | 0.89 | fallback | yes (1) | none | Repair booked: autonomous, engineer told uncertain (backup rules) | 13/13 | $0.50 |
 | frustrated_repair | 1 | — | — | — | n/a (nothing submitted) | none | ENVIRONMENT FAILURE | — | $0.00 |
-| frustrated_repair | 2 | B | 0.87 | subagent | yes (1) | none | Repair booked: autonomous, meets threshold | 11/11 | $0.58 |
-| frustrated_repair | 3 | B | 0.85 | subagent | yes (1) | none | Repair booked: autonomous, meets threshold | 11/11 | $0.60 |
-| frustrated_repair | 4 | B | 0.86 | subagent | yes (1) | none | Repair booked: autonomous, meets threshold | 10/11 | $0.58 |
-| frustrated_repair | 5 | B | 0.85 | subagent | yes (1) | none | Repair booked: autonomous, meets threshold | 10/11 | $0.55 |
+| frustrated_repair | 2 * | B | 0.87 | subagent | yes (1) | none | Repair booked: autonomous, meets threshold | 12/12 | $0.58 |
+| frustrated_repair | 3 * | B | 0.85 | subagent | yes (1) | none | Repair booked: autonomous, meets threshold | 12/12 | $0.60 |
+| frustrated_repair | 4 * | B | 0.86 | subagent | yes (1) | none | Repair booked: autonomous, meets threshold | 12/12 | $0.58 |
+| frustrated_repair | 5 * | B | 0.85 | subagent | yes (1) | none | Repair booked: autonomous, meets threshold | 12/12 | $0.55 |
+| messy_resident | 1 * | B | 0.60 | subagent | yes (1, 2, 3) | 2 assessed (B->B); 3 assessed (B->B) | Ops: slots rejected | 7/7 | $0.00 |
+| messy_resident | 2 * | B | 0.76 | subagent | yes (1) | none | Repair booked: autonomous, meets threshold | 7/7 | $0.00 |
+| messy_resident | 3 * | B | 0.78 | subagent | yes (1) | 2 no_change | Repair booked: autonomous, meets threshold | 7/7 | $0.00 |
+| messy_resident | 4 * | B | 0.78 | subagent | yes (1) | none | Repair booked: autonomous, meets threshold | 7/7 | $0.00 |
 
-## Consistency (the five new scenarios)
+\* Re-scored against the current checks from `logs/decision_log.jsonl`, without re-running; the row's `rescored` field in the jsonl says how and keeps the original result. A messy_resident row re-scored from a reassessment_cap run is the same run: its cost is counted once, under reassessment_cap.
+
+## Consistency (every scenario that reaches repair-vs-replace)
 
 Routing should match across three runs on the same code. Only runs on each scenario's latest commit (the commit of its most recent run) are counted; runs on older commits are listed as pre-fix and not counted. Environment failures are excluded.
 
+- **clear_repair**: incomplete (1 run of 3 on d87ae41). Routing: run 1: Repair booked: autonomous, meets threshold. Code/confidence: B 0.85.
+- **likely_replacement**: incomplete (1 run of 3 on d87ae41). Routing: run 1: Replacement booked: engineer confirmed, PM approved. Code/confidence: A 0.82.
+- **cracked_hob**: incomplete (1 run of 3 on d87ae41). Routing: run 1: Replacement booked: engineer confirmed. Code/confidence: A 0.60.
+- **parts_delayed**: incomplete (1 run of 3 on d87ae41). Routing: run 1: Repair booked: autonomous, meets threshold. Code/confidence: B 0.80.
+- **resident_rejects**: incomplete (1 run of 3 on d87ae41). Routing: run 1: Ops: slots rejected. Code/confidence: B 0.85.
 - **new_fault_info**: **consistent** across 3 runs on 893b73d. Routing: run 2: Replacement booked: engineer confirmed, PM approved; run 3: Replacement booked: engineer confirmed, PM approved; run 4: Replacement booked: engineer confirmed, PM approved. Code/confidence: A 0.60, A 0.55, A 0.60. Pre-fix, not counted: run 1 (d87ae41): Replacement booked: engineer confirmed, PM approved.
 - **irrelevant_info**: **consistent** across 3 runs on 893b73d. Routing: run 3: Repair booked: autonomous, meets threshold; run 4: Repair booked: autonomous, meets threshold; run 5: Repair booked: autonomous, meets threshold. Code/confidence: B 0.85, B 0.85, B 0.80. Pre-fix, not counted: run 1 (d87ae41): Repair booked: autonomous, meets threshold; run 2 (7a9b1c4): Repair booked: autonomous, meets threshold.
 - **reassessment_cap**: **consistent** across 3 runs on 893b73d. Routing: run 3: Repair booked: autonomous, meets threshold; run 4: Repair booked: autonomous, meets threshold; run 5: Repair booked: autonomous, meets threshold. Code/confidence: B 0.76, B 0.78, B 0.78. Pre-fix, not counted: run 2 (7a9b1c4-dirty): Ops: slots rejected.
 - **fallback_repair**: **consistent** across 3 runs on 893b73d. Routing: run 3: Repair booked: autonomous, engineer told uncertain (backup rules); run 4: Repair booked: autonomous, engineer told uncertain (backup rules); run 5: Repair booked: autonomous, engineer told uncertain (backup rules). Code/confidence: B 0.89, B 0.89, B 0.89. Pre-fix, not counted: run 2 (7a9b1c4-dirty): Repair booked: autonomous, engineer told uncertain (backup rules).
 - **frustrated_repair**: **consistent** across 3 runs on 893b73d. Routing: run 3: Repair booked: autonomous, meets threshold; run 4: Repair booked: autonomous, meets threshold; run 5: Repair booked: autonomous, meets threshold. Code/confidence: B 0.85, B 0.86, B 0.85. Pre-fix, not counted: run 2 (7a9b1c4-dirty): Repair booked: autonomous, meets threshold.
-
-Existing scenarios were run once each; see their rows above.
+- **messy_resident**: **consistent** across 3 runs on 893b73d. Routing: run 2: Repair booked: autonomous, meets threshold; run 3: Repair booked: autonomous, meets threshold; run 4: Repair booked: autonomous, meets threshold. Code/confidence: B 0.76, B 0.78, B 0.78. Pre-fix, not counted: run 1 (7a9b1c4-dirty): Ops: slots rejected.
 
 ## Failed or not exercised
 
@@ -74,9 +84,7 @@ Existing scenarios were run once each; see their rows above.
 - reassessment_cap run 5: FAIL - no visit was booked
 - fallback_repair run 1: ENVIRONMENT FAILURE - the SDK reported is_error on the triage loop (stop_reason='stop_sequence') (not evidence about the agent)
 - frustrated_repair run 1: ENVIRONMENT FAILURE - the SDK reported is_error on the triage loop (stop_reason='stop_sequence') (not evidence about the agent)
-- frustrated_repair run 4: FAIL - the brief holds none of the resident's frustration
-- frustrated_repair run 5: FAIL - the brief holds none of the resident's frustration
 
 ## Totals
 
-32 runs (3 environment failures), 287/306 checks passed, total cost $18.81.
+36 runs (3 environment failures), 321/338 checks passed, total cost $18.81.
