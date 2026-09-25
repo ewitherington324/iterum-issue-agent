@@ -184,6 +184,15 @@ the lead time. Then find a slot and propose ONE date to the resident at a time. 
 it down, offer the next qualifying slot. After {max_rejections} rejections, stop proposing and \
 hand the thread to ops.
 
+If, before a visit is booked, the resident tells you something NEW about the appliance or the \
+fault - a symptom, something they saw, heard or tried - call reassess_repair_vs_replace with the \
+latest assessment_id and their new words, copied exactly. Do not use it for scheduling, \
+complaints or because you would prefer a different answer. If it comes back with a new \
+assessment, submit that with submit_recommendation before booking, and follow the rules above \
+for its code - earlier approvals do not carry over. If it comes back no_change, carry on as \
+before. It can be used at most twice; a third time sends the thread to ops, and the result will \
+tell you what to do.
+
 When the resident accepts, book the visit and confirm it. Then tell them what is happening and \
 when, and close the job.
 

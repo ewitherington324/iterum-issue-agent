@@ -43,6 +43,22 @@ async def pre_hook(tool, tool_input=None):
         {"tool_name": tool, "tool_input": tool_input or {}}, "tu_test", {"signal": None})
 
 
+def give_recommendation(code, source="subagent"):
+    """Put a submitted recommendation on the active issue, as submit_recommendation would.
+
+    The gate reads the submitted code (Module 3 step 3), so gate checks need one.
+    """
+    issue = STORE.active_issue()
+    a = assessments.record(issue, issue["appliance_id"], {
+        "source": source, "code": code, "confidence": 0.8, "rationale": "test",
+        "evidence_used": [], "evidence_missing": [], "limits_applied": [],
+        "contra_indicators": ["c"], "determinative": False, "confidence_basis": "test"})
+    issue["recommendation"] = code
+    issue["confidence"] = a["confidence"]
+    issue["recommendation_assessment_id"] = a["assessment_id"]
+    return a
+
+
 def denied(hook_result):
     hso = (hook_result or {}).get("hookSpecificOutput", {})
     return hso.get("permissionDecision") == "deny", hso.get("permissionDecisionReason", "")
@@ -56,8 +72,9 @@ async def main():
     check("setting_sources=[] so no user/project settings leak in", opts.setting_sources == [])
     check("permission_mode is 'default' so gated calls reach can_use_tool",
           opts.permission_mode == "default")
-    check("17 tools registered (14 PRD tools + 3 loop exits; search_similar_issues is the "
-          "subagent's)", len(ALL_TOOLS) == 17, f"got {len(ALL_TOOLS)}")
+    check("18 tools registered (14 PRD tools + reassess + 3 loop exits; "
+          "search_similar_issues is the subagent's)", len(ALL_TOOLS) == 18,
+          f"got {len(ALL_TOOLS)}")
     check("book_visit is NOT auto-approved (it must reach the gate)",
           qualified("book_visit") not in AUTONOMOUS_TOOLS)
     check("send_resident_message IS auto-approved (repair path is autonomous)",
@@ -104,6 +121,7 @@ async def main():
     section("can_use_tool - repair path is fully autonomous")
     STORE.load_scenario("clear_repair")
     s = session.set_current(session.IssueSession(json.loads(Path("scenarios/clear_repair.json").read_text())))
+    give_recommendation("B")
     r = await gates.can_use_tool(qualified("book_visit"),
                                  {"visit_type": "repair", "slot_date": "2026-09-16"}, None)
     check("repair booking allowed with no human in the loop", r.behavior == "allow")
@@ -117,6 +135,7 @@ async def main():
           cost > KNOBS.pm_cost_threshold_gbp)
 
     s = session.set_current(session.IssueSession(scn))
+    give_recommendation("A")
     r = await gates.can_use_tool(qualified("book_visit"), {"visit_type": "replacement"}, None)
     check("blocked with no engineer confirmation", r.behavior == "deny")
     check("  ...and the refusal says what is missing", "engineer" in r.message.lower())
@@ -262,6 +281,15 @@ async def main():
     check("  ...and adds it to the issue's assessment log",
           assessments.latest(issue)["assessment_id"] == first["assessment_id"])
     out = await assess_repair_vs_replace.handler(fault_args)
+    check("a second plain assess_repair_vs_replace call is refused - reassess is the only way "
+          "back in", out.get("is_error") and len(assessments.history(issue)) == 1
+          and "reassess_repair_vs_replace" in out["content"][0]["text"])
+    STORE.append_conversation("resident", "Now there's water left in the drum after every cycle.")
+    from agent.tools import reassess_repair_vs_replace
+    out = await reassess_repair_vs_replace.handler({
+        "issue_id": issue["id"], "appliance_id": issue["appliance_id"],
+        "previous_assessment_id": first["assessment_id"],
+        "new_information": ["water left in the drum after every cycle"]})
     second = json.loads(out["content"][0]["text"])
     KNOBS.use_llm_for_decision_analysis = True
 
@@ -398,12 +426,14 @@ async def main():
         raise subagent.SubagentError("no submission")
 
     subagent.run = broken_run
+    issue["assessments"] = []  # a fresh first assessment; a second call would be refused
     out = await assess_repair_vs_replace.handler(good)
     a = json.loads(out["content"][0]["text"])
     check("if the subagent fails, the fallback answers instead", a.get("source") == "fallback",
           str(a.get("source")))
     subagent.run = fake_run
     calls.clear()
+    issue["assessments"] = []
     out = await assess_repair_vs_replace.handler(dict(good, resident_symptoms=["made up words here"]))
     check("rejected input returns an error and never reaches the subagent",
           out.get("is_error") and not calls)
@@ -450,9 +480,10 @@ async def main():
     check("subagent: tools=[] and setting_sources=[] (invariant 1)",
           sopts.tools == [] and sopts.setting_sources == [])
     check("subagent: its own MCP server only", list(sopts.mcp_servers) == ["rvr"])
-    check("subagent: get_appliance, search_similar_issues and submit_assessment only",
+    check("subagent: get_appliance, search_similar_issues and its two exits only",
           sorted(sopts.allowed_tools) == sorted(f"mcp__rvr__{n}" for n in
-          ("get_appliance", "search_similar_issues", "submit_assessment")), str(sopts.allowed_tools))
+          ("get_appliance", "search_similar_issues", "submit_assessment", "submit_no_change")),
+          str(sopts.allowed_tools))
     ro = {t.name: t.annotations for t in subagent.TOOLS}
     check("  ...and both lookups are read-only",
           all(ro[n] and ro[n].read_only_hint for n in ("get_appliance", "search_similar_issues")))
@@ -485,6 +516,207 @@ async def main():
     check("main agent no longer has search_similar_issues",
           qualified("search_similar_issues") not in AUTONOMOUS_TOOLS
           and "search_similar_issues" not in {t.name for t in ALL_TOOLS})
+
+    # ---------------------------------------------------------------- Module 3 step 3: re-invocation
+    section("Re-invocation: relevance check and the cap of two (Module 3)")
+    from agent.tools import reassess_repair_vs_replace, send_ops_message  # noqa: F401
+    reassess = reassess_repair_vs_replace.handler
+    STORE.load_scenario("clear_repair")
+    s = session.set_current(session.IssueSession(json.loads(Path("scenarios/clear_repair.json").read_text())))
+    s.enter_loop(session.DECISION)
+    issue = STORE.active_issue()
+    for line in ["There's a low humming noise when it should pump out, then nothing happens.",
+                 "Oh and now it smells a bit musty and there's water left in the drum.",
+                 "Also I can only do Tuesdays after 3pm because of work.",
+                 "The door seal has a split in it, I just noticed."]:
+        STORE.append_conversation("resident", line)
+
+    mode = {"answer": "assessed"}
+    calls = []
+
+    async def fake_run(b):
+        calls.append(b)
+        if mode["answer"] == "no_change":
+            return {"no_change_reason": "Scheduling preference, not about the fault."}
+        return _afm(_RVR(code="B", confidence=0.74, rationale="Pump fault, repairable.",
+                         key_factors=["k"], contra_indicators=["c"]), inputs={})
+
+    subagent.run = fake_run
+    KNOBS.use_llm_for_decision_analysis = True
+    base = {"issue_id": issue["id"], "appliance_id": issue["appliance_id"]}
+    out = await assess_repair_vs_replace.handler(dict(base,
+        troubleshooting=[{"step": "Cleaned the filter", "result": "No change"}],
+        resident_symptoms=["low humming noise when it should pump out"], known_gaps=[]))
+    rvr1 = json.loads(out["content"][0]["text"])
+    calls.clear()
+
+    schema = reassess_repair_vs_replace.input_schema
+    check("reassess takes only issue, appliance, previous assessment ID and new quotes",
+          sorted(schema["properties"]) == sorted(subagent.REINVOKE_FIELDS)
+          and schema.get("additionalProperties") is False, str(sorted(schema["properties"])))
+    relevant = dict(base, previous_assessment_id=rvr1["assessment_id"],
+                    new_information=["now it smells a bit musty and there's water left in the drum"])
+    for label, args in [
+        ("an unknown previous assessment ID", dict(relevant, previous_assessment_id="ISS-X-RVR-9")),
+        ("a paraphrased quote", dict(relevant, new_information=["It has started to smell damp"])),
+        ("a verdict", dict(relevant, new_information=["it needs replacing"])),
+        ("earlier evidence re-sent by the main agent",
+         dict(relevant, resident_symptoms=["low humming noise when it should pump out"])),
+    ]:
+        r = await reassess(args)
+        check(f"rejected: {label}", r.get("is_error"), r["content"][0]["text"][:160])
+    check("  ...none of them reached the subagent or counted towards the cap",
+          not calls and assessments.reassessment_count(issue) == 0)
+
+    out = await reassess(relevant)
+    rvr2 = json.loads(out["content"][0]["text"])
+    check("relevant new information: the subagent re-assesses",
+          rvr2.get("status") == "assessed" and rvr2.get("reassesses") == rvr1["assessment_id"]
+          and len(calls) == 1, str({k: rvr2.get(k) for k in ("status", "reassesses")}))
+    b2 = calls[-1]
+    check("  ...on the earlier evidence from the log plus the new quote, marked as new",
+          b2["troubleshooting"] == rvr1["brief"]["troubleshooting"]
+          and b2["resident_symptoms"] == rvr1["brief"]["resident_symptoms"]
+          and b2["new_information"] == relevant["new_information"]
+          and "NEW since the last assessment" in subagent.render_brief(b2))
+    check("  ...without being shown its previous code or confidence",
+          not {"code", "confidence", "rationale"} & set(b2)
+          and "0.74" not in subagent.render_brief(b2))
+    check("the re-assessment instructions carry the relevance check; a first assessment's do not",
+          subagent.REINVOCATION in subagent.system_prompt("Washer Dryer", b2["fault_slug"], True)
+          and subagent.REINVOCATION not in subagent.system_prompt("Washer Dryer", b2["fault_slug"]))
+    r = await reassess(dict(relevant, new_information=["The door seal has a split in it"]))
+    check("the superseded assessment cannot be re-assessed from", r.get("is_error"),
+          r["content"][0]["text"][:160])
+
+    mode["answer"] = "no_change"
+    out = await reassess(dict(base, previous_assessment_id=rvr2["assessment_id"],
+                              new_information=["I can only do Tuesdays after 3pm"]))
+    rvr3 = json.loads(out["content"][0]["text"])
+    check("irrelevant new information: logged as no_change with the subagent's reason",
+          rvr3.get("status") == "no_change" and "Scheduling" in (rvr3.get("rationale") or ""),
+          str({k: rvr3.get(k) for k in ("status", "rationale")}))
+    check("  ...carrying the previous code and confidence for reference only",
+          rvr3.get("code") == rvr2["code"] and rvr3.get("confidence") == rvr2["confidence"]
+          and rvr3.get("meets_threshold") is False and rvr3.get("carried_from") == rvr2["assessment_id"])
+    check("  ...and it counts towards the cap", assessments.reassessment_count(issue) == 2)
+    nb = subagent.build_reinvocation_brief(issue, STORE.appliance(issue["appliance_id"]),
+                                           assessments.latest(issue), ["x"])
+    check("information judged not about the fault is not carried into later evidence",
+          not any("Tuesdays" in q for q in nb["resident_symptoms"])
+          and any("musty" in q for q in nb["resident_symptoms"]), str(nb["resident_symptoms"]))
+
+    r = await submit_recommendation.handler({"assessment_id": rvr3["assessment_id"]})
+    check("a no_change cannot be submitted", r.get("is_error"))
+    r = await submit_recommendation.handler({"assessment_id": rvr2["assessment_id"]})
+    check("  ...the newest assessed one still can, past a later no_change",
+          not r.get("is_error") and issue["recommendation_assessment_id"] == rvr2["assessment_id"],
+          r["content"][0]["text"][:160])
+
+    calls.clear()
+    ops_before = len(STORE.data["ops_queue"])
+    s.enter_loop(session.BOOKING)
+    out = await reassess(dict(base, previous_assessment_id=rvr3["assessment_id"],
+                              new_information=["The door seal has a split in it"]))
+    res = json.loads(out["content"][0]["text"])
+    check("third re-invocation goes to ops instead", res.get("status") == "escalated_to_ops",
+          str(res.get("status")))
+    check("  ...without running the subagent or adding an assessment",
+          not calls and len(assessments.history(issue)) == 3)
+    ops = STORE.data["ops_queue"][ops_before:]
+    check("  ...code raised the ops request itself, with the assessment history attached",
+          len(ops) == 1 and ops[0]["category"] == "escalation"
+          and all(a["assessment_id"] in ops[0]["request"] for a in (rvr1, rvr2, rvr3))
+          and "door seal" in ops[0]["request"], str(ops)[:200])
+    check("  ...and the escalation is recorded on the issue with the full history",
+          len((issue.get("assessment_escalated") or {}).get("history", [])) == 3
+          and s.assessment_escalated)
+    for tool in ("book_visit", "find_available_technician", "submit_recommendation",
+                 "reassess_repair_vs_replace", "assess_repair_vs_replace", "send_engineer_message"):
+        d, reason = denied(await pre_hook(qualified(tool), {}))
+        check(f"after escalation: {tool} is blocked by the hook", d, reason)
+    for tool in ("send_resident_message", "send_ops_message", "close_job", "conclude_booking"):
+        d, _ = denied(await pre_hook(qualified(tool), {}))
+        check(f"after escalation: {tool} still allowed (the handoff must work)", not d)
+
+    # Fallback and window, on a fresh issue.
+    STORE.load_scenario("clear_repair")
+    s = session.set_current(session.IssueSession(json.loads(Path("scenarios/clear_repair.json").read_text())))
+    s.enter_loop(session.DECISION)
+    issue = STORE.active_issue()
+    STORE.append_conversation("resident", "It hums when it should pump out, then nothing.")
+    STORE.append_conversation("resident", "There's water left in the drum as well.")
+    KNOBS.use_llm_for_decision_analysis = False
+    out = await assess_repair_vs_replace.handler(dict(base, issue_id=issue["id"],
+        troubleshooting=[], resident_symptoms=["It hums when it should pump out"], known_gaps=[]))
+    f1 = json.loads(out["content"][0]["text"])
+    out = await reassess(dict(base, issue_id=issue["id"], previous_assessment_id=f1["assessment_id"],
+                              new_information=["water left in the drum"]))
+    f2 = json.loads(out["content"][0]["text"])
+    check("fallback re-invocation: assessed, and says no relevance check was made",
+          f2.get("status") == "assessed" and f2.get("source") == "fallback"
+          and "not performed" in (f2.get("relevance_check") or ""),
+          str({k: f2.get(k) for k in ("status", "source", "relevance_check")}))
+    KNOBS.use_llm_for_decision_analysis = True
+    STORE.add_visit({"id": "VIS-T", "issue_id": issue["id"], "type": "repair",
+                     "slot_date": "2026-09-30", "status": "provisional"})
+    r = await reassess(dict(base, issue_id=issue["id"], previous_assessment_id=f2["assessment_id"],
+                            new_information=["water left in the drum"]))
+    check("once a visit is booked, the assessment can no longer be revisited",
+          r.get("is_error") and "visit" in r["content"][0]["text"].lower())
+    subagent.run = real_run
+
+    subagent._submission, subagent._no_change_reason, subagent._reinvocation = None, None, False
+    r = await subagent.submit_no_change.handler({"reason": "scheduling"})
+    check("subagent: submit_no_change is refused on a first assessment",
+          r.get("is_error") and subagent._no_change_reason is None)
+    subagent._reinvocation = True
+    r = await subagent.submit_no_change.handler({"reason": "scheduling"})
+    check("  ...and accepted on a re-assessment", not r.get("is_error")
+          and subagent._no_change_reason == "scheduling")
+    r = await subagent.submit_assessment.handler(
+        {"code": "B", "confidence": 0.8, "rationale": "r", "key_factors": ["k"],
+         "contra_indicators": ["c"]})
+    check("  ...and only one answer per run", r.get("is_error"))
+    subagent._submission, subagent._no_change_reason, subagent._reinvocation = None, None, False
+
+    # ---------------------------------------------------------------- Module 3 step 3: gate
+    section("The booking gate follows the submitted code, never visit_type (Module 3)")
+    STORE.load_scenario("likely_replacement")
+    s = session.set_current(session.IssueSession(scn))
+    r = await gates.can_use_tool(qualified("book_visit"), {"visit_type": "repair"}, None)
+    check("no submitted recommendation: booking refused", r.behavior == "deny", getattr(r, "message", ""))
+    a1 = give_recommendation("A")
+    r = await gates.can_use_tool(qualified("book_visit"), {"visit_type": "repair"}, None)
+    check('code A booked as visit_type "repair" still hits the engineer gate',
+          r.behavior == "deny" and "engineer" in r.message.lower(), getattr(r, "message", ""))
+    s.engineer_decision = {"decision": "override", "note": "Element only", "engineer": "Tomas Novak"}
+    r = await gates.can_use_tool(qualified("book_visit"), {"visit_type": "repair"}, None)
+    check("  ...an engineer override is the one route to a repair booking", r.behavior == "allow")
+    r = await gates.can_use_tool(qualified("book_visit"), {"visit_type": "replacement"}, None)
+    check("  ...and after an override a replacement stays blocked", r.behavior == "deny")
+
+    s.engineer_decision = {"decision": "confirm", "note": "", "engineer": "Tomas Novak"}
+    s.pm_decision = {"decision": "approve", "note": ""}
+    s.enter_loop(session.BOOKING)
+    assessments.record(STORE.active_issue(), STORE.active_issue()["appliance_id"], {
+        "source": "subagent", "code": "B", "confidence": 0.8, "rationale": "new info",
+        "evidence_used": [], "evidence_missing": [], "limits_applied": [],
+        "contra_indicators": ["c"], "determinative": False, "confidence_basis": "test",
+        "reassesses": a1["assessment_id"]})
+    r = await gates.can_use_tool(qualified("book_visit"), {"visit_type": "replacement"}, None)
+    check("a booking on a superseded assessment is refused, approvals or not",
+          r.behavior == "deny" and "superseded" in r.message.lower(), getattr(r, "message", ""))
+    newest = assessments.latest(STORE.active_issue())
+    r = await submit_recommendation.handler({"assessment_id": newest["assessment_id"]})
+    check("submitting a different assessment clears the approvals given on the old one",
+          not r.get("is_error") and s.engineer_decision is None and s.pm_decision is None)
+    r = await gates.can_use_tool(qualified("book_visit"), {"visit_type": "replacement"}, None)
+    check('code B booked as visit_type "replacement" is refused as a mismatch',
+          r.behavior == "deny" and "code B" in r.message,
+          getattr(r, "message", ""))
+    r = await gates.can_use_tool(qualified("book_visit"), {"visit_type": "repair"}, None)
+    check("  ...and books as a repair with no human in the loop", r.behavior == "allow")
 
     # ---------------------------------------------------------------- Module 3: skill isolation
     section("The repair-vs-replace skill never reaches the main agent (Module 3)")

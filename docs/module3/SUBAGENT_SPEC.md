@@ -79,7 +79,8 @@ Not `check_warranty`: warranty is settled in triage and in-warranty jobs never r
 The precondition check above is a guard in code, not a second lookup.
 
 It returns its answer by calling `submit_assessment`, an exit tool rather than a data tool
-(CLAUDE.md invariant 5), which validates the answer against the output table.
+(CLAUDE.md invariant 5), which validates the answer against the output table. On
+re-invocation only, it has a second exit, `submit_no_change`, taking a reason.
 
 ## Inputs
 
@@ -107,6 +108,13 @@ On re-invocation, additionally:
 
 - The previous assessment ID
 - The new information, quoted exactly as the resident said it
+
+Re-invocation is its own main-agent tool, `reassess_repair_vs_replace`, whose schema holds only
+the issue ID, appliance ID, previous assessment ID and the new quotes. The main agent does not
+re-send the earlier evidence: code rebuilds the brief from the previous assessment's stored brief
+and adds the new quotes, marked as new, so earlier evidence cannot be restated or dropped. The
+subagent is not shown its previous code or confidence; it judges relevance, then (if relevant)
+assesses the combined evidence afresh.
 
 The filter for what counts as fault information is the same in both cases: about the appliance
 or the fault goes in; scheduling preferences, logistics and unrelated grievances stay out.
@@ -145,6 +153,14 @@ is recorded on the assessment and in the log. The code does not decide whether a
 - **Its answer is final.** The main agent submits by `assessment_id` only. `submit_recommendation`
   no longer accepts a code or confidence, so there is nothing to overwrite. Only the latest
   assessment for an issue can be submitted.
+- **The booking gate follows the submitted code, never the visit type.** Whether a booking is a
+  replacement is read from the submitted recommendation (codes A and C), not from the
+  `visit_type` the main agent passes to `book_visit`, so a code A booked as "repair" still hits
+  the engineer gate. The one way a replace code becomes a repair booking is an engineer
+  override — a human, not the main agent. A code B booked as a replacement is refused as a
+  mismatch. `book_visit` is also refused if no recommendation has been submitted, or if a newer
+  assessment exists than the one submitted. Submitting a different assessment clears any
+  engineer or PM decision given on the previous one.
 - **The main agent has no route to disagree.** Its only lever is new information: if the resident
   says something new about the appliance or fault, it re-invokes the subagent. It cannot escalate
   because it prefers a different answer. The human check on the recommendation is the engineer,
@@ -167,6 +183,27 @@ has a fault reference file. (No reference file → ops, as per the PRD.)
 
 **Re-invoked** when the resident shares new information about the appliance or fault. At most
 twice per issue. A third attempt goes to ops instead, with the assessment history attached.
+
+- **Window.** Re-invocation is allowed in the decision and booking loops until a visit is booked.
+  A plain second call to `assess_repair_vs_replace` is refused once an assessment exists, so the
+  cap cannot be bypassed.
+- **Relevance.** The subagent decides, not code. If the new information is not about the
+  appliance or fault, it exits with `submit_no_change` and a reason; the log records
+  `status: no_change`, carrying forward the previous code and confidence for reference. A
+  `no_change` cannot be submitted, so the recommendation already submitted stands. If it is
+  relevant, it re-assesses and exits with `submit_assessment` as usual.
+- **What counts.** Every re-invocation that reaches the subagent counts towards the cap, whether
+  it ends `assessed` or `no_change`. Input rejected by the filter (not verbatim, a verdict, a
+  stale previous ID) never reached the subagent and does not count.
+- **The cap.** On a third attempt the subagent is not run. Code raises the ops request itself,
+  with the full assessment history attached, rather than relying on the main agent to include
+  it. The thread is then marked escalated and the `PreToolUse` hook blocks booking, slot-finding
+  and submitting for the rest of it.
+- **A new assessment in booking** must be submitted with `submit_recommendation` before booking
+  continues; the gate refuses a booking on a superseded assessment.
+- **Fallback on re-invocation.** The rules-based fallback ignores resident statements, so it
+  cannot judge relevance honestly. It re-runs and is recorded `assessed` with
+  `relevance_check: not performed (fallback)`. Finished in build step 4.
 
 ## Fallback
 

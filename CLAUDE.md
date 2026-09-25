@@ -13,7 +13,7 @@ Module 3 work follows docs/module3/SUBAGENT_SPEC.md. If the code and the spec di
 
 ```bash
 ./run.sh                              # http://localhost:8000
-.venv/bin/python selftest.py          # 113 checks, no API key, ~1s — use this constantly
+.venv/bin/python selftest.py          # 160 checks, no API key, ~1s — use this constantly
 .venv/bin/python verify.py            # all 8 scenarios against the real model (~$3)
 .venv/bin/python verify.py self_fix   # one scenario, verbose trace (~$0.15–0.70)
 ```
@@ -42,7 +42,8 @@ prototype makes.
    run first in the SDK's permission order, so the warranty block cannot be reasoned around.
    `agent/prompts.py` describes the rules so the agent behaves sensibly; the hook makes them
    true. Don't migrate one to the other.
-   *Exception:* the subagent's warranty/no-reference guard is in the `assess_repair_vs_replace` handler, because it must log a `refused` assessment and read warranty from the store rather than rely on `check_warranty` having run.
+   *Exception:* the subagent's warranty/no-reference guard is in the `assess_repair_vs_replace` handler, because it must log a `refused` assessment and read warranty from the store rather than rely on `check_warranty` having run. The re-invocation cap of two sits beside it in `reassess_repair_vs_replace` for the same reason (it raises the ops request with the history itself); once it fires, the hook blocks booking for the rest of the thread.
+   The booking gate (`agent/gates.py`) reads the *submitted* recommendation code, never the `visit_type` the main agent passes — a code A booked as "repair" still hits the engineer gate.
 
 4. **Never pass `kind`, `seq` or `at` as a payload key to `BUS.publish()`** (`agent/events.py`).
    `publish(kind, **payload)` takes `kind` positionally, so `publish("x", kind="y")` raises
@@ -74,10 +75,12 @@ prototype makes.
 
 ```
 agent/runner.py     orchestration: one ClaudeSDKClient per issue, three loop phases
-agent/tools.py      14 PRD tools + 3 exit tools -> one in-process MCP server (the 15th,
-                    search_similar_issues, belongs to the subagent)
+agent/tools.py      14 PRD tools + reassess_repair_vs_replace + 3 exit tools -> one
+                    in-process MCP server (the 15th PRD tool, search_similar_issues, belongs
+                    to the subagent)
 agent/subagent.py   the repair-vs-replace subagent: input filter, warranty/reference guard,
-                    its own session with get_appliance + search_similar_issues + an exit tool
+                    its own session with get_appliance + search_similar_issues + two exits
+                    (submit_assessment, and submit_no_change on re-invocation)
 agent/gates.py      can_use_tool — the engineer/PM approval gate on book_visit
 agent/trace.py      PreToolUse/PostToolUse hooks — trace, guardrails, decision log
 agent/prompts.py    system prompt + per-loop instructions

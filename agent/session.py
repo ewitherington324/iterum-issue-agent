@@ -58,6 +58,8 @@ class IssueSession:
         # Guardrail state, set by tool handlers and read by the PreToolUse hook
         self.warranty_blocked: bool = False
         self.halted_reason: str | None = None
+        # Set when a third re-assessment request sends the thread to ops (Module 3 step 3).
+        self.assessment_escalated: bool = False
 
         self.slot_rejections: int = 0
         self.proposed_slots: list[str] = []
@@ -144,6 +146,7 @@ class IssueSession:
             "slot_rejections": self.slot_rejections,
             "warranty_blocked": self.warranty_blocked,
             "halted_reason": self.halted_reason,
+            "assessment_escalated": self.assessment_escalated,
             "cost_usd": round(self.cost_usd, 4),
         }
 

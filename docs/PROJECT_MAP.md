@@ -33,7 +33,10 @@ Main agent — one session per issue (agent/runner.py)
    │     ends with submit_recommendation (the assessment's ID — code and confidence come from the log)
    │
    └─ 3. BOOKING ────── checks stock, proposes slots (fixed rule), books
-         book_visit is held by a gate until the engineer (and PM, if over £400) approve
+         book_visit is held by a gate until the engineer (and PM, if over £400) approve;
+         the gate reads the submitted code, not the visit type the main agent passes
+         new fault info from the resident → reassess_repair_vs_replace (max 2; the
+         subagent may answer "no change"; a 3rd goes to ops with the history)
 ```
 
 The escalation skill isn't a separate call. Its rules are copied by hand into the main agent's
@@ -44,7 +47,7 @@ own instructions (`agent/prompts.py`) so they apply from the first message.
 | Path | What it is |
 |---|---|
 | `agent/runner.py` | Runs the three phases in order |
-| `agent/tools.py` | The 17 tools the main agent can use (14 from the PRD + 3 "I'm done with this phase" tools) |
+| `agent/tools.py` | The 18 tools the main agent can use (14 from the PRD, `reassess_repair_vs_replace`, and 3 "I'm done with this phase" tools) |
 | `agent/subagent.py` | The repair-vs-replace subagent: checks what the main agent passes it, refuses in-warranty jobs, runs with its own two lookups |
 | `agent/reasoning.py` | The troubleshooting-steps AI call, and the shape every repair-vs-replace answer must have |
 | `agent/skills.py` | Reads the skill files and hands them to those calls |
@@ -55,7 +58,7 @@ own instructions (`agent/prompts.py`) so they apply from the first message.
 | `agent/prompts.py` | Main agent instructions, including the escalation rules |
 | `skills/` | The three Module 2 skills + ten appliance fault references |
 | `scenarios/` | The 8 test cases |
-| `selftest.py` | 113 quick checks, free, no API key |
+| `selftest.py` | 160 quick checks, free, no API key |
 | `verify.py` | Runs scenarios against the real model — costs money |
 | `static/`, `server.py` | The browser demo |
 | `docs/` | PRD, this map, and `module2/` (submitted write-up, evidence, old prompts) |

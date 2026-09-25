@@ -143,8 +143,11 @@ async def run_scenario(scenario_id: str, auto_play: bool = True) -> dict:
             if decision is None:
                 # A refused assessment (in warranty, or no fault reference) has nothing to
                 # submit; the main agent is told to hand to ops. That is a proper ending.
-                latest = assessments.latest(STORE.active_issue())
-                if not (latest and latest["status"] == "refused"):
+                # So is a third re-assessment request, which code has already sent to ops.
+                issue = STORE.active_issue()
+                latest = assessments.latest(issue)
+                if not ((latest and latest["status"] == "refused")
+                        or issue.get("assessment_escalated")):
                     BUS.publish("run_incomplete", loop=session.DECISION,
                                 detail="The decision loop ended without calling "
                                        "submit_recommendation.")

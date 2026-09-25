@@ -32,6 +32,12 @@ The subagent's tool surface is two read-only lookups plus an exit tool, submit_a
 which is how its answer leaves (invariant 5: loop exits are explicit tool calls). The
 exit tool validates against the same Pydantic model as before, so a weighed call with no
 contra-indicators is refused and the subagent can correct it.
+
+Re-invocation (build step 3) uses the same session shape. The main agent passes only the
+previous assessment ID and the new quotes; `build_reinvocation_brief` rebuilds the rest
+from the log. The subagent's instructions gain a relevance section, and it has a second
+exit, submit_no_change, for new information that is not about the appliance or fault. The
+cap of two re-invocations is enforced by the caller, not here.
 """
 
 from __future__ import annotations
@@ -192,6 +198,81 @@ def check_input(issue: dict, args: dict, conversation: list[dict]) -> list[str]:
 
 
 # =====================================================================================
+# Re-invocation input filter (spec: "When it's called", build step 3)
+# =====================================================================================
+
+REINVOKE_FIELDS = ("issue_id", "appliance_id", "previous_assessment_id", "new_information")
+
+REINVOKE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "issue_id": {"type": "string"},
+        "appliance_id": {"type": "string"},
+        "previous_assessment_id": {
+            "type": "string",
+            "description": "The latest assessment_id for this issue."},
+        "new_information": {
+            "type": "array",
+            "minItems": 1,
+            "description": "What the resident has newly said about the appliance or the "
+                           "fault, copied exactly from their messages. You may shorten a "
+                           "quote to the part about the fault.",
+            "items": {"type": "string"}},
+    },
+    "required": list(REINVOKE_FIELDS),
+    "additionalProperties": False,
+}
+
+# A re-assessment can only follow one that the subagent could still revise.
+REVISABLE = {"assessed", "no_change"}
+
+
+def check_reinvocation(issue: dict, args: dict, conversation: list[dict],
+                       latest: dict | None) -> list[str]:
+    """Every reason this re-invocation cannot go to the subagent, or [] if it can.
+
+    Nothing rejected here reaches the subagent, so none of it counts towards the cap.
+    """
+    problems = []
+    extra = sorted(set(args) - set(REINVOKE_FIELDS))
+    if extra:
+        problems.append(f"Unexpected fields {extra}. Only {list(REINVOKE_FIELDS)} are "
+                        "accepted - the earlier evidence is carried over by the system.")
+    if args.get("issue_id") != issue["id"]:
+        problems.append(f"issue_id must be the active issue, {issue['id']}.")
+    if args.get("appliance_id") != issue["appliance_id"]:
+        problems.append(f"appliance_id must be this issue's appliance, "
+                        f"{issue['appliance_id']}.")
+
+    if latest is None:
+        problems.append("There is no assessment to revisit yet. Call "
+                        "assess_repair_vs_replace first.")
+    elif args.get("previous_assessment_id") != latest["assessment_id"]:
+        problems.append(f"previous_assessment_id must be the latest assessment for this "
+                        f"issue, {latest['assessment_id']}.")
+    elif latest["status"] not in REVISABLE:
+        problems.append(f"{latest['assessment_id']} was {latest['status']}, so there is "
+                        "nothing to re-assess. Follow the instruction it came with.")
+    if issue.get("visits"):
+        problems.append("A visit is already booked, so the assessment can no longer be "
+                        "revisited. The engineer will see the new information on site.")
+
+    quotes = args.get("new_information") or []
+    if not quotes:
+        problems.append("new_information needs at least one quote from the resident.")
+    for q in quotes:
+        if not is_verbatim(q, conversation):
+            problems.append(f"Not found word for word in the resident's messages: {q!r}. "
+                            "Copy their exact words, or a shortened part of them.")
+        found = verdicts_in(q)
+        if found:
+            problems.append(f"new_information contains a verdict ({', '.join(found)!s}). "
+                            "Describe the fault only - the repair-vs-replace judgement is "
+                            "not made here.")
+    return problems
+
+
+# =====================================================================================
 # Preconditions - the guard in code (spec: "Responsibilities")
 # =====================================================================================
 
@@ -256,9 +337,37 @@ def build_brief(issue: dict, appliance: dict, args: dict) -> dict:
     }
 
 
+def build_reinvocation_brief(issue: dict, appliance: dict, previous: dict,
+                             new_information: list[str]) -> dict:
+    """The previous brief, refreshed from the store, plus the new quotes marked as new.
+
+    Evidence from earlier rounds comes from the log, not the main agent, so it cannot be
+    restated or dropped. New information from an assessed round is folded into the
+    evidence; from a no_change round it is left out - the subagent judged it not about
+    the fault.
+    """
+    prev = previous["brief"]
+    carried = list(prev["resident_symptoms"])
+    if previous["status"] == "assessed":
+        carried += [q for q in prev.get("new_information") or [] if q not in carried]
+    brief = build_brief(issue, appliance, {
+        "troubleshooting": prev["troubleshooting"],
+        "resident_symptoms": carried,
+        "known_gaps": prev["known_gaps"],
+    })
+    brief["previous_assessment_id"] = previous["assessment_id"]
+    brief["new_information"] = list(new_information)
+    return brief
+
+
 def render_brief(b: dict) -> str:
     def bullets(items):
         return "\n".join(f"  - {i}" for i in items) or "  (none)"
+
+    new = ""
+    if b.get("new_information"):
+        new = ("\n\nNEW since the last assessment - the resident's own words (verbatim):\n"
+               + bullets(f'"{q}"' for q in b["new_information"]))
 
     ratio = f"{b['cost_ratio']:.0%}" if b["cost_ratio"] is not None else "unknown"
     return (
@@ -279,6 +388,7 @@ def render_brief(b: dict) -> str:
         "The resident's own words about the appliance (verbatim):\n"
         + bullets(f'"{q}"' for q in b["resident_symptoms"]) + "\n\n"
         "Known gaps:\n" + bullets(b["known_gaps"])
+        + new
     )
 
 
@@ -287,7 +397,7 @@ You work separately from the agent that spoke to the resident. You see only the 
 evidence you are given and what your own lookup tools return.
 
 Before assessing, use get_appliance for the appliance record and search_similar_issues for \
-comparable past jobs. Then call submit_assessment exactly once. Your assessment is logged as \
+comparable past jobs. Then submit your answer exactly once. Your assessment is logged as \
 you submit it and nothing downstream can change it.
 
 A resident's tone is not evidence. "It's completely useless" says how they feel, not what is \
@@ -297,12 +407,25 @@ scheduling preference, a remark about a previous engineer - leave it out of the 
 You do not talk to the resident, contact anyone, book anything or change any record."""
 
 
+REINVOCATION = """THIS IS A RE-ASSESSMENT. The issue was assessed before, and the resident has \
+since said something new, shown under "NEW since the last assessment".
+
+First decide one thing: is the new information about the appliance or the fault - a symptom, \
+something they saw, heard, smelt or tried? A complaint, a scheduling preference, a remark \
+about a previous engineer, or how frustrated they are is not.
+
+- If it is not about the appliance or the fault, do not re-assess. Call submit_no_change with \
+a one-sentence reason. The earlier assessment stands.
+- If it is, assess all of the evidence afresh - the earlier evidence and the new - exactly as \
+you would a first assessment, and call submit_assessment."""
+
+
 # Loaded at import so a missing skill fails at startup, not mid-thread (invariant 6).
 SKILL = load_skill(DECISION_SKILL)
 
 
-def system_prompt(appliance_type: str, fault_slug: str) -> str:
-    parts = [PREAMBLE, SKILL]
+def system_prompt(appliance_type: str, fault_slug: str, reinvocation: bool = False) -> str:
+    parts = [PREAMBLE] + ([REINVOCATION] if reinvocation else []) + [SKILL]
     reference = fault_reference(appliance_type, fault_slug)
     if reference:
         parts.append(f"--- Fault pattern reference ---\n{reference}")
@@ -316,6 +439,8 @@ def system_prompt(appliance_type: str, fault_slug: str) -> str:
 # One issue runs at a time (session.CURRENT is the same assumption), so the submission is
 # held at module level for the duration of one run.
 _submission: RepairVsReplace | None = None
+_no_change_reason: str | None = None
+_reinvocation: bool = False  # submit_no_change only exists as an answer on a re-assessment
 
 
 def _ok(payload) -> dict:
@@ -371,8 +496,8 @@ async def search_similar_issues(args):
       _inline_refs(RepairVsReplace.model_json_schema()))
 async def submit_assessment(args):
     global _submission
-    if _submission is not None:
-        return _err("An assessment has already been submitted for this run.")
+    if _submission is not None or _no_change_reason is not None:
+        return _err("An answer has already been submitted for this run.")
     try:
         _submission = RepairVsReplace.model_validate(args)
     except ValidationError as exc:
@@ -380,7 +505,29 @@ async def submit_assessment(args):
     return _ok("Assessment submitted. You are done.")
 
 
-TOOLS = [get_appliance, search_similar_issues, submit_assessment]
+@tool("submit_no_change",
+      "Re-assessments only. Call instead of submit_assessment when the new information is "
+      "not about the appliance or the fault, with a one-sentence reason.",
+      {"type": "object",
+       "properties": {"reason": {"type": "string"}},
+       "required": ["reason"],
+       "additionalProperties": False})
+async def submit_no_change(args):
+    global _no_change_reason
+    if not _reinvocation:
+        return _err("This is a first assessment, not a re-assessment. Call "
+                    "submit_assessment.")
+    if _submission is not None or _no_change_reason is not None:
+        return _err("An answer has already been submitted for this run.")
+    reason = str(args.get("reason", "")).strip()
+    if not reason:
+        return _err("Give the reason the new information is not about the appliance or "
+                    "the fault.")
+    _no_change_reason = reason
+    return _ok("No change recorded. You are done.")
+
+
+TOOLS = [get_appliance, search_similar_issues, submit_assessment, submit_no_change]
 SERVER = create_sdk_mcp_server(name=SERVER_NAME, version="1.0.0", tools=TOOLS)
 ALLOWED_TOOLS = [f"{PREFIX}{t.name}" for t in TOOLS]
 
@@ -409,7 +556,7 @@ async def pre_tool_use(input_data, tool_use_id, context):
         return {}
 
     reason = (f"{tool_name} is not available to the repair-vs-replace subagent. It has "
-              "get_appliance, search_similar_issues and submit_assessment only.")
+              "get_appliance, search_similar_issues, submit_assessment and submit_no_change only.")
     BUS.publish("guardrail", rule="subagent_tool_surface", detail=reason, tool=name)
     trace.log_decision("guardrail_block", rule="subagent_tool_surface", tool=tool_name)
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
@@ -460,32 +607,65 @@ def build_options(system: str) -> ClaudeAgentOptions:
 # Running it
 # =====================================================================================
 
-async def _run(brief: dict) -> tuple[RepairVsReplace, float]:
-    global _submission
-    _submission = None
+async def _run(brief: dict) -> tuple[RepairVsReplace | str, float]:
+    """Returns the parsed assessment, or the no-change reason on a re-assessment."""
+    global _submission, _no_change_reason, _reinvocation
+    _submission, _no_change_reason = None, None
+    _reinvocation = bool(brief.get("new_information"))
     cost = 0.0
-    options = build_options(system_prompt(brief["appliance_type"], brief["fault_slug"]))
-    async with ClaudeSDKClient(options=options) as client:
-        await client.query(render_brief(brief))
-        async for message in client.receive_response():
-            if isinstance(message, ResultMessage):
-                cost = message.total_cost_usd or 0.0
-                if message.is_error:
-                    raise SubagentError(f"subagent session ended in error "
-                                        f"({message.subtype}, {message.stop_reason})")
+    options = build_options(system_prompt(brief["appliance_type"], brief["fault_slug"],
+                                          reinvocation=_reinvocation))
+    try:
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(render_brief(brief))
+            async for message in client.receive_response():
+                if isinstance(message, ResultMessage):
+                    cost = message.total_cost_usd or 0.0
+                    if message.is_error:
+                        raise SubagentError(f"subagent session ended in error "
+                                            f"({message.subtype}, {message.stop_reason})")
+    finally:
+        _reinvocation = False
+    if _no_change_reason is not None:
+        return _no_change_reason, cost
     if _submission is None:
         raise SubagentError("the subagent ended without calling submit_assessment")
     return _submission, cost
 
 
+def no_change(previous: dict, reason: str) -> dict:
+    """A no_change answer in the output-table shape.
+
+    Code and confidence are carried forward from the previous assessment for reference only:
+    a no_change is not submittable, and the recommendation already submitted stands.
+    """
+    return {
+        "source": "subagent",
+        "code": previous["code"], "confidence": previous["confidence"],
+        "rationale": reason,
+        "evidence_used": [], "evidence_missing": [], "limits_applied": [],
+        "contra_indicators": [], "determinative": False,
+        "confidence_basis": f"carried forward from {previous['assessment_id']}; "
+                            "not re-assessed",
+        "no_change_reason": reason,
+        "carried_from": previous["assessment_id"],
+    }
+
+
 async def run(brief: dict) -> dict:
-    """Run the subagent on a brief and return its assessment in the output-table shape."""
+    """Run the subagent on a brief and return its answer in the output-table shape.
+
+    On a re-assessment the answer may be a no-change: the result then carries
+    `no_change_reason` and only that, and the caller builds the entry with no_change().
+    """
     BUS.publish("subagent_started", brief=brief)
     parsed, cost = await asyncio.wait_for(_run(brief), timeout=TIMEOUT_S)
     try:
         session.current().subagent_cost_usd += cost
     except RuntimeError:
         pass
+    if isinstance(parsed, str):
+        return {"no_change_reason": parsed, "subagent_cost_usd": round(cost, 4)}
     return assessment_from_model(parsed, inputs={
         "age_years": STORE.appliance_age_years(STORE.appliance(brief["appliance_id"])),
         "repair_cost": brief["estimated_repair_cost"],

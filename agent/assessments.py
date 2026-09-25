@@ -28,6 +28,9 @@ TABLE_FIELDS = (
 STATUSES = {"assessed", "no_change", "refused"}
 SOURCES = {"subagent", "fallback"}
 
+# Spec, "When it's called": at most two re-invocations per issue; a third goes to ops.
+MAX_REASSESSMENTS = 2
+
 
 class AssessmentShapeError(ValueError):
     """An assessment is missing fields from the output table."""
@@ -44,6 +47,34 @@ def latest(issue: dict) -> dict | None:
 
 def find(issue: dict, assessment_id: str) -> dict | None:
     return next((a for a in history(issue) if a["assessment_id"] == assessment_id), None)
+
+
+def latest_assessed(issue: dict) -> dict | None:
+    """The newest assessment that carries a recommendation. A no_change does not replace it."""
+    return next((a for a in reversed(history(issue)) if a["status"] == "assessed"), None)
+
+
+def reassessment_count(issue: dict) -> int:
+    """Re-invocations that reached the subagent (or its fallback), assessed or no_change.
+
+    Input the filter rejected is never recorded, so it cannot count.
+    """
+    return sum(1 for a in history(issue) if a.get("reassesses"))
+
+
+def escalate(issue: dict, attempted: dict) -> dict:
+    """Record that the cap was reached. The ops request itself is raised by the caller."""
+    record = {
+        "reason": (f"The resident gave new information a third time; the assessment has "
+                   f"already been revisited {MAX_REASSESSMENTS} times, which is the limit."),
+        "attempted": attempted,
+        "history": [dict(a) for a in history(issue)],
+        "at": datetime.utcnow().isoformat() + "Z",
+    }
+    issue["assessment_escalated"] = record
+    trace.log_decision("reassessment_cap_reached", attempted=attempted,
+                       assessment_ids=[a["assessment_id"] for a in record["history"]])
+    return record
 
 
 def enforce_reported_limits(assessment: dict) -> dict | None:

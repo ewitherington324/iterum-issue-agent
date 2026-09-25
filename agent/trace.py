@@ -38,9 +38,17 @@ WARRANTY_BLOCKED_TOOLS = {
     "book_visit", "confirm_visit", "find_available_technician", "send_email",
 }
 
+# Module 3: once a third re-assessment request has sent the thread to ops, nothing may
+# move it towards a booking or revisit the assessment again.
+ESCALATED_BLOCKED_TOOLS = {
+    "book_visit", "confirm_visit", "find_available_technician", "send_email",
+    "send_engineer_message", "submit_recommendation", "assess_repair_vs_replace",
+    "reassess_repair_vs_replace",
+}
+
 # Calls worth writing to the permanent decision log (PRD section 7).
 LOGGED_TOOLS = {
-    "assess_repair_vs_replace", "submit_recommendation", "send_engineer_message",
+    "assess_repair_vs_replace", "reassess_repair_vs_replace", "submit_recommendation", "send_engineer_message",
     "send_email", "book_visit", "confirm_visit", "close_job", "complete_triage",
     "conclude_booking", "send_ops_message",
     # Logged for its `reference_matched` flag: it is the only record of whether the
@@ -123,6 +131,25 @@ async def pre_tool_use(input_data, tool_use_id, context):
         )
         BUS.publish("guardrail", rule="warranty", detail=reason, tool=name)
         log_decision("guardrail_block", rule="warranty", tool=name, tool_input=tool_input)
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
+
+    # --- Guardrail: re-assessment cap reached (Module 3) ------------------------------
+    if s is not None and s.assessment_escalated and name in ESCALATED_BLOCKED_TOOLS:
+        reason = (
+            "The repair-vs-replace assessment has been revisited the maximum number of "
+            "times and this thread is now with ops, who have the assessment history. "
+            f"{name} is blocked. Tell the resident the team will be in touch and close the "
+            "job as 'handed_to_ops'."
+        )
+        BUS.publish("guardrail", rule="reassessment_cap", detail=reason, tool=name)
+        log_decision("guardrail_block", rule="reassessment_cap", tool=name,
+                     tool_input=tool_input)
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
