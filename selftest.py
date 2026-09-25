@@ -728,6 +728,55 @@ async def main():
         d, _ = denied(await pre_hook(qualified(tool), {}))
         check(f"after escalation: {tool} still allowed (the handoff must work)", not d)
 
+    # Spec, "Not a slot rejection": a slot answered with new fault information that leads to a
+    # re-invocation does not count towards the slot limit. reassessment_cap run 2 hit the slot
+    # limit before the cap because it did.
+    section("A reply that leads to a re-assessment is not a slot rejection (Module 3)")
+    from agent.tools import find_available_technician
+    find = find_available_technician.handler
+    STORE.load_scenario("clear_repair")
+    s = session.set_current(session.IssueSession(json.loads(Path("scenarios/clear_repair.json").read_text())))
+    s.enter_loop(session.DECISION)
+    issue = STORE.active_issue()
+    STORE.append_conversation("resident", "There's a low humming noise when it should pump out.")
+    mode["answer"] = "assessed"
+    out = await assess_repair_vs_replace.handler(dict(base,
+        troubleshooting=[{"step": "Cleaned the filter", "result": "No change"}],
+        resident_symptoms=["low humming noise when it should pump out"], known_gaps=[]))
+    prev = json.loads(out["content"][0]["text"])
+    s.enter_loop(session.BOOKING)
+    where = {"property_id": issue["property_id"], "earliest_date": STORE.today.isoformat()}
+
+    async def offer():
+        r = await find(where)
+        return r, (None if r.get("is_error") else json.loads(r["content"][0]["text"])["slot_date"])
+
+    for quote in ["now it smells a bit musty", "the door seal has a split in it"]:
+        await offer()
+        STORE.append_conversation("resident", f"Before we pick a day - {quote}.")
+        out = await reassess(dict(base, previous_assessment_id=prev["assessment_id"],
+                                  new_information=[quote]))
+        prev = json.loads(out["content"][0]["text"])
+    await offer()
+    check("two slots answered with new fault information are not counted as rejections",
+          s.slot_rejections == 0 and len(s.proposed_slots) == 3
+          and s.slots_not_rejected == set(s.proposed_slots[:2]),
+          str({"rejections": s.slot_rejections, "proposed": s.proposed_slots}))
+    r = await reassess(dict(base, previous_assessment_id=prev["assessment_id"],
+                            new_information=["It has started to smell damp"]))
+    await offer()
+    check("  ...but a slot answered with input the filter refused still counts",
+          r.get("is_error") and s.slot_rejections == 1, str(s.slot_rejections))
+    while True:
+        r, slot = await offer()
+        if slot is None:
+            break
+    check("  ...and the limit still fires after three real rejections, handing to ops",
+          len(s.proposed_slots) == 2 + KNOBS.max_slot_rejections
+          and s.slot_rejections == KNOBS.max_slot_rejections
+          and "ops" in r["content"][0]["text"].lower(),
+          str({"rejections": s.slot_rejections, "proposed": len(s.proposed_slots)}))
+
     # No fallback on re-invocation (Module 3 step 4), on a fresh issue.
     section("Re-invocation never runs the fallback; a failure leaves the assessment standing (Module 3 step 4)")
     from agent.tools import book_visit

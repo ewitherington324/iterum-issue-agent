@@ -216,6 +216,14 @@ twice per issue. A third attempt goes to ops instead, with the assessment histor
   with the full assessment history attached, rather than relying on the main agent to include
   it. The thread is then marked escalated and the `PreToolUse` hook blocks booking, slot-finding
   and submitting for the rest of it.
+- **Not a slot rejection.** A resident reply to a proposed slot that leads to a re-invocation
+  is not a rejection of that slot, so it does not count towards the three-slot limit (PRD 5.1).
+  The resident has not turned the date down; they have said something new about the fault. When
+  `reassess_repair_vs_replace` accepts a call (it passes the filter, including a call the cap
+  then stops), the latest proposed slot is marked not rejected. Input the filter rejects
+  excuses nothing. The re-invocation cap bounds how many slots can be excused this way. This
+  keeps the two limits separate: in `reassessment_cap` run 2 (step 5) the slot limit fired
+  before the cap because each slot answered with new information was counted as rejected.
 - **A new assessment in booking** must be submitted with `submit_recommendation` before booking
   continues; the gate refuses a booking on a superseded assessment.
 - **No fallback on re-invocation.** The rules-based fallback ignores resident statements, so

@@ -1,6 +1,6 @@
 # Module 3 step 5 - verify.py results
 
-Generated 2026-09-25T16:51:25 from `step5.jsonl`. Commits: 7a9b1c4, 7a9b1c4-dirty, d87ae41. Confidence threshold: 0.7. Model claude-opus-5, resident simulator claude-haiku-4-5.
+Generated 2026-09-25T17:06:32 from `step5.jsonl`. Commits: 7a9b1c4, 7a9b1c4-dirty, d87ae41. Confidence threshold: 0.7. Model claude-opus-5, resident simulator claude-haiku-4-5.
 
 Code, confidence and source are the final submitted assessment. 'Submitted = assessed' compares every submission against the assessment it names, from the event stream. Routing is worked out from the final state, never from the agent's own text.
 
@@ -26,13 +26,13 @@ Code, confidence and source are the final submitted assessment. 'Submitted = ass
 
 ## Consistency (the five new scenarios)
 
-Routing should match across all three runs. Environment failures are excluded.
+Routing should match across three runs on the same code. Only runs on each scenario's latest commit (the commit of its most recent run) are counted; runs on older commits are listed as pre-fix and not counted. Environment failures are excluded.
 
-- **new_fault_info**: incomplete (1 run of 3). Routing: run 1: Replacement booked: engineer confirmed, PM approved. Code/confidence: A 0.60.
-- **irrelevant_info**: incomplete (2 runs of 3). Routing: run 1: Repair booked: autonomous, meets threshold; run 2: Repair booked: autonomous, meets threshold. Code/confidence: B 0.78, B 0.78.
-- **reassessment_cap**: incomplete (1 run of 3). Routing: run 2: Ops: slots rejected. Code/confidence: B 0.60.
-- **fallback_repair**: incomplete (1 run of 3). Routing: run 2: Repair booked: autonomous, engineer told uncertain (backup rules). Code/confidence: B 0.89.
-- **frustrated_repair**: incomplete (1 run of 3). Routing: run 2: Repair booked: autonomous, meets threshold. Code/confidence: B 0.87.
+- **new_fault_info**: incomplete (1 run of 3 on d87ae41). Routing: run 1: Replacement booked: engineer confirmed, PM approved. Code/confidence: A 0.60.
+- **irrelevant_info**: incomplete (1 run of 3 on 7a9b1c4). Routing: run 2: Repair booked: autonomous, meets threshold. Code/confidence: B 0.78. Pre-fix, not counted: run 1 (d87ae41): Repair booked: autonomous, meets threshold.
+- **reassessment_cap**: incomplete (1 run of 3 on 7a9b1c4-dirty). Routing: run 2: Ops: slots rejected. Code/confidence: B 0.60.
+- **fallback_repair**: incomplete (1 run of 3 on 7a9b1c4-dirty). Routing: run 2: Repair booked: autonomous, engineer told uncertain (backup rules). Code/confidence: B 0.89.
+- **frustrated_repair**: incomplete (1 run of 3 on 7a9b1c4-dirty). Routing: run 2: Repair booked: autonomous, meets threshold. Code/confidence: B 0.87.
 
 Existing scenarios were run once each; see their rows above.
 

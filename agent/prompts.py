@@ -182,7 +182,8 @@ Either way: check stock for the parts this job will need before you propose a da
 is short, ask ops to order it and add the lead time - the earliest viable date is today plus \
 the lead time. Then find a slot and propose ONE date to the resident at a time. If they turn \
 it down, offer the next qualifying slot. After {max_rejections} rejections, stop proposing and \
-hand the thread to ops.
+hand the thread to ops. A reply that tells you something new about the fault (see below) is not \
+a rejection of the date.
 
 If, before a visit is booked, the resident tells you something NEW about the appliance or the \
 fault - a symptom, something they saw, heard or tried - call reassess_repair_vs_replace with the \

@@ -661,7 +661,10 @@ def _git_commit() -> str:
     try:
         sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
                              capture_output=True, text=True).stdout.strip()
-        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
+        # The results files are excluded: every run appends to them, so without this the
+        # second run of a pass is already "-dirty" on unchanged code.
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no", "--",
+                                ".", f":(exclude){RESULTS_DIR.relative_to(ROOT)}"],
                                cwd=ROOT, capture_output=True, text=True).stdout.strip()
         return sha + ("-dirty" if dirty else "")
     except OSError:
@@ -711,25 +714,36 @@ def write_markdown(rows: list[dict], md_path: Path) -> None:
                      f"{r['routing']} | {checks(r)} | ${r['cost_usd']:.2f} |")
 
     lines += ["", "## Consistency (the five new scenarios)", "",
-              "Routing should match across all three runs. Environment failures are excluded.",
+              "Routing should match across three runs on the same code. Only runs on each "
+              "scenario's latest commit (the commit of its most recent run) are counted; "
+              "runs on older commits are listed as pre-fix and not counted. Environment "
+              "failures are excluded.",
               ""]
     for sid in NEW_SCENARIOS:
-        runs = [r for r in rows if r["scenario"] == sid and not r["env_failure"]]
-        if not runs:
+        mine = sorted((r for r in rows if r["scenario"] == sid), key=lambda r: r["at"])
+        if not mine:
             lines.append(f"- **{sid}**: no runs yet.")
+            continue
+        latest = mine[-1]["commit"]
+        runs = [r for r in mine if r["commit"] == latest and not r["env_failure"]]
+        pre_fix = [r for r in mine if r["commit"] != latest and not r["env_failure"]]
+        old = ("" if not pre_fix else " Pre-fix, not counted: " + "; ".join(
+            f"run {r['run']} ({r['commit']}): {r['routing']}" for r in pre_fix) + ".")
+        if not runs:
+            lines.append(f"- **{sid}**: no scored runs on {latest} yet.{old}")
             continue
         routes = [r["routing"] for r in runs]
         codes = ", ".join(f"{r['code'] or '—'} {conf(r)}" for r in runs)
         n = f"{len(runs)} run{'s' if len(runs) != 1 else ''}"
         if len(runs) < 3:
-            verdict = f"incomplete ({n} of 3)"
+            verdict = f"incomplete ({n} of 3 on {latest})"
         elif len(set(routes)) == 1:
-            verdict = f"**consistent** across {n}"
+            verdict = f"**consistent** across {n} on {latest}"
         else:
-            verdict = f"**differs** across {n}"
+            verdict = f"**differs** across {n} on {latest}"
         lines.append(f"- **{sid}**: {verdict}. Routing: "
                      + "; ".join(f"run {r['run']}: {r['routing']}" for r in runs)
-                     + f". Code/confidence: {codes}.")
+                     + f". Code/confidence: {codes}.{old}")
     lines += ["", "Existing scenarios were run once each; see their rows above.", ""]
 
     failures = [r for r in rows if r["failed"] or r["not_exercised"] or r["env_failure"]]

@@ -297,6 +297,12 @@ async def reassess_repair_vs_replace(args):
         trace.log_decision("reassessment_input_rejected", problems=problems, tool_input=args)
         return err("The re-assessment input was not accepted:\n- " + "\n- ".join(problems))
 
+    # The resident answered the latest slot with new fault information rather than turning
+    # it down, so it is not a rejection (spec: "When it's called", "Not a slot rejection").
+    s = session.current()
+    if s.proposed_slots:
+        s.slots_not_rejected.add(s.proposed_slots[-1])
+
     # The cap (spec: "When it's called"). A guard in code, beside the warranty guard: the
     # ops request is raised here so the history is attached whatever the main agent does.
     if assessments.reassessment_count(issue) >= assessments.MAX_REASSESSMENTS:
@@ -311,7 +317,6 @@ async def reassess_repair_vs_replace(args):
                                                  escalation["history"]]},
                                 indent=2, default=str))
         STORE.add_ops_request(request, "escalation")
-        s = session.current()
         s.assessment_escalated = True
         STORE.save()
         detail = (f"{issue['id']}: third re-assessment request. Sent to ops with "
@@ -418,9 +423,10 @@ async def find_available_technician(args):
     s = session.current()
 
     # PRD 5.1: one slot at a time; after N rejections the thread goes to ops. Enforced
-    # here rather than left to the prompt, so the loop cannot propose indefinitely.
+    # here rather than left to the prompt, so the loop cannot propose indefinitely. A slot
+    # answered with new fault information (see reassess_repair_vs_replace) is not a rejection.
     if s.proposed_slots:
-        s.slot_rejections = len(s.proposed_slots)
+        s.slot_rejections = sum(1 for d in s.proposed_slots if d not in s.slots_not_rejected)
         if s.slot_rejections >= KNOBS.max_slot_rejections:
             BUS.publish("guardrail", rule="slot_rejections", tool="find_available_technician",
                         detail=f"{s.slot_rejections} slots already rejected "

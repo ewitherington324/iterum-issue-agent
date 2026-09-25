@@ -63,6 +63,9 @@ class IssueSession:
 
         self.slot_rejections: int = 0
         self.proposed_slots: list[str] = []
+        # Slots the resident answered with new fault information (the reply led to a
+        # re-invocation) - not rejections, so not counted towards the slot limit.
+        self.slots_not_rejected: set[str] = set()
         self.tool_calls: list[dict] = []
         self.cost_usd: float = 0.0
         # The subagent is a separate session with its own bill; cost_usd is the main
