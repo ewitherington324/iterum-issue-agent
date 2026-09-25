@@ -223,8 +223,9 @@ REINVOKE_SCHEMA = {
     "additionalProperties": False,
 }
 
-# A re-assessment can only follow one that the subagent could still revise.
-REVISABLE = {"assessed", "no_change"}
+# A re-assessment can only follow one that the subagent could still revise. A failed
+# re-assessment left the previous one standing, so it can be tried again (within the cap).
+REVISABLE = {"assessed", "no_change", "reassessment_failed"}
 
 
 def check_reinvocation(issue: dict, args: dict, conversation: list[dict],
@@ -344,12 +345,15 @@ def build_reinvocation_brief(issue: dict, appliance: dict, previous: dict,
     Evidence from earlier rounds comes from the log, not the main agent, so it cannot be
     restated or dropped. New information from an assessed round is folded into the
     evidence; from a no_change round it is left out - the subagent judged it not about
-    the fault.
+    the fault; from a reassessment_failed round it is still new - nothing ever judged it.
     """
     prev = previous["brief"]
     carried = list(prev["resident_symptoms"])
     if previous["status"] == "assessed":
         carried += [q for q in prev.get("new_information") or [] if q not in carried]
+    if previous["status"] == "reassessment_failed":
+        unjudged = list(prev.get("new_information") or [])
+        new_information = unjudged + [q for q in new_information if q not in unjudged]
     brief = build_brief(issue, appliance, {
         "troubleshooting": prev["troubleshooting"],
         "resident_symptoms": carried,
@@ -649,6 +653,27 @@ def no_change(previous: dict, reason: str) -> dict:
                             "not re-assessed",
         "no_change_reason": reason,
         "carried_from": previous["assessment_id"],
+    }
+
+
+def reassessment_failed(previous: dict, reason: str) -> dict:
+    """A failed re-invocation in the output-table shape. No fallback runs on re-invocation.
+
+    Like a no_change, code and confidence are carried forward for reference only; it is not
+    submittable, and the recommendation already submitted stands.
+    """
+    return {
+        "source": "subagent",
+        "code": previous["code"], "confidence": previous["confidence"],
+        "rationale": (f"The re-assessment could not be run ({reason}). "
+                      f"{previous.get('carried_from') or previous['assessment_id']} stands; "
+                      "the new information has not been assessed."),
+        "evidence_used": [], "evidence_missing": [], "limits_applied": [],
+        "contra_indicators": [], "determinative": False,
+        "confidence_basis": f"carried forward from {previous['assessment_id']}; "
+                            "not re-assessed",
+        "failure_reason": reason,
+        "carried_from": previous.get("carried_from") or previous["assessment_id"],
     }
 
 

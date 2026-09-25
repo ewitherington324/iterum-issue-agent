@@ -197,8 +197,9 @@ async def main():
     section("Rules-based fallback (PRD 4.1)")
     expectations = {
         "self_fix": "B", "clear_repair": "B", "likely_replacement": "A",
-        "in_warranty": "D", "parts_delayed": "B", "resident_rejects": "B",
+        "parts_delayed": "B", "resident_rejects": "B", "cracked_hob": "A",
     }
+    fallback_results = {}
     for sid, expected in expectations.items():
         STORE.load_scenario(sid)
         issue = STORE.active_issue()
@@ -206,9 +207,48 @@ async def main():
         res = assess_heuristic(STORE.appliance_age_years(app),
                                issue["estimated_repair_cost"],
                                issue["estimated_replacement_cost"],
-                               STORE.warranty(app)["in_warranty"])
+                               STORE.warranty(app)["in_warranty"],
+                               fault_slug=issue["fault_slug_reported"])
+        fallback_results[sid] = res
         check(f"{sid}: heuristic gives {expected} (conf {res['confidence']})",
               res["code"] == expected, f"got {res['code']}")
+    check("every fallback result says it came from the backup rules",
+          all("backup rules" in r["rationale"] for r in fallback_results.values()))
+    check("every weighed fallback result gives contra_indicators, as the subagent must",
+          all(r["contra_indicators"] for r in fallback_results.values() if not r["determinative"]))
+    STORE.load_scenario("in_warranty")
+    issue = STORE.active_issue()
+    app = STORE.appliance(issue["appliance_id"])
+    try:
+        assess_heuristic(STORE.appliance_age_years(app), issue["estimated_repair_cost"],
+                         issue["estimated_replacement_cost"], True)
+        raised = False
+    except ValueError:
+        raised = True
+    check("in warranty never reaches the fallback: it raises rather than returning a D", raised)
+
+    section("Fallback reads the skill's determinative table (Module 3 step 4)")
+    from agent.fallbacks import FAULT_PATTERNS, FIXED_OUTCOME_NO_PHOTO_LIMIT
+    from agent.skills import (DECISION_SKILL as _DSK, determinative_faults, load_skill as _lsk,
+                              reference_sections)
+    table = determinative_faults()
+    check("the table is read from the skill: hob_surface_damage -> A",
+          table.get("hob_surface_damage", {}).get("code") == "A", str(table))
+    hob = fallback_results["cracked_hob"]
+    check("cracked hob on the fallback path: A, determinative, not weighed on age or cost",
+          hob["code"] == "A" and hob["determinative"] is True
+          and "not computed from age or cost" in hob["confidence_basis"], str(hob)[:200])
+    check("  ...confidence held at the skill's no-photo limit, recorded in limits_applied",
+          hob["confidence"] == FIXED_OUTCOME_NO_PHOTO_LIMIT
+          and [l["limit"] for l in hob["limits_applied"]] == [FIXED_OUTCOME_NO_PHOTO_LIMIT])
+    check(f"  ...and the skill still sets that limit ('assess at {FIXED_OUTCOME_NO_PHOTO_LIMIT} or below')",
+          f"assess at {FIXED_OUTCOME_NO_PHOTO_LIMIT} or below" in _lsk(_DSK))
+
+    section("Triage fault patterns match the reference files (open issue #5)")
+    sections = reference_sections()
+    unmatched = sorted(set(FAULT_PATTERNS) - sections)
+    check(f"every FAULT_PATTERNS key is a reference-file section ({len(FAULT_PATTERNS)} keys)",
+          not unmatched, str(unmatched))
 
     # ---------------------------------------------------------------- Module 3: output table
     section("Repair-vs-replace output table (Module 3)")
@@ -285,13 +325,24 @@ async def main():
           "back in", out.get("is_error") and len(assessments.history(issue)) == 1
           and "reassess_repair_vs_replace" in out["content"][0]["text"])
     STORE.append_conversation("resident", "Now there's water left in the drum after every cycle.")
+    from agent import subagent as _sa
     from agent.tools import reassess_repair_vs_replace
+    # The fallback does not run on re-invocation (step 4), so a stand-in subagent answers.
+    _real_run = _sa.run
+
+    async def _stand_in(b):
+        return assessment_from_model(RepairVsReplace(
+            code="B", confidence=0.8, rationale="Pump fault.", key_factors=["k"],
+            contra_indicators=["c"]), inputs={})
+
+    _sa.run = _stand_in
+    KNOBS.use_llm_for_decision_analysis = True
     out = await reassess_repair_vs_replace.handler({
         "issue_id": issue["id"], "appliance_id": issue["appliance_id"],
         "previous_assessment_id": first["assessment_id"],
         "new_information": ["water left in the drum after every cycle"]})
     second = json.loads(out["content"][0]["text"])
-    KNOBS.use_llm_for_decision_analysis = True
+    _sa.run = _real_run
 
     sub = submit_recommendation.handler
     r = await sub({"assessment_id": second["assessment_id"], "code": "B", "confidence": 0.99})
@@ -639,28 +690,74 @@ async def main():
         d, _ = denied(await pre_hook(qualified(tool), {}))
         check(f"after escalation: {tool} still allowed (the handoff must work)", not d)
 
-    # Fallback and window, on a fresh issue.
+    # No fallback on re-invocation (Module 3 step 4), on a fresh issue.
+    section("Re-invocation never runs the fallback; a failure leaves the assessment standing (Module 3 step 4)")
+    from agent.tools import book_visit
     STORE.load_scenario("clear_repair")
     s = session.set_current(session.IssueSession(json.loads(Path("scenarios/clear_repair.json").read_text())))
     s.enter_loop(session.DECISION)
     issue = STORE.active_issue()
     STORE.append_conversation("resident", "It hums when it should pump out, then nothing.")
     STORE.append_conversation("resident", "There's water left in the drum as well.")
+    STORE.append_conversation("resident", "And it's started leaking from the front.")
     KNOBS.use_llm_for_decision_analysis = False
     out = await assess_repair_vs_replace.handler(dict(base, issue_id=issue["id"],
         troubleshooting=[], resident_symptoms=["It hums when it should pump out"], known_gaps=[]))
     f1 = json.loads(out["content"][0]["text"])
+    await submit_recommendation.handler({"assessment_id": f1["assessment_id"]})
+    s.engineer_decision = {"decision": "confirm", "note": "", "engineer": "T"}
     out = await reassess(dict(base, issue_id=issue["id"], previous_assessment_id=f1["assessment_id"],
                               new_information=["water left in the drum"]))
     f2 = json.loads(out["content"][0]["text"])
-    check("fallback re-invocation: assessed, and says no relevance check was made",
-          f2.get("status") == "assessed" and f2.get("source") == "fallback"
-          and "not performed" in (f2.get("relevance_check") or ""),
-          str({k: f2.get(k) for k in ("status", "source", "relevance_check")}))
+    check("subagent switched off: logged reassessment_failed, not assessed or no_change",
+          f2.get("status") == "reassessment_failed" and "switched off" in (f2.get("failure_reason") or ""),
+          str({k: f2.get(k) for k in ("status", "failure_reason")}))
+    check("  ...the fallback was not run: the previous assessment stands and is still submitted",
+          assessments.latest_assessed(issue)["assessment_id"] == f1["assessment_id"]
+          and issue["recommendation_assessment_id"] == f1["assessment_id"]
+          and len([a for a in assessments.history(issue) if a["status"] == "assessed"]) == 1)
+    check("  ...no approvals were cleared", s.engineer_decision is not None)
+    check("  ...it counts towards the cap", assessments.reassessment_count(issue) == 1)
+    r = await submit_recommendation.handler({"assessment_id": f2["assessment_id"]})
+    check("  ...and it cannot be submitted", r.get("is_error"))
+    r = await gates.can_use_tool(qualified("book_visit"), {"visit_type": "repair"}, None)
+    check("  ...booking still rests on the standing assessment",
+          isinstance(r, gates.PermissionResultAllow), getattr(r, "message", ""))
+
     KNOBS.use_llm_for_decision_analysis = True
-    STORE.add_visit({"id": "VIS-T", "issue_id": issue["id"], "type": "repair",
-                     "slot_date": "2026-09-30", "status": "provisional"})
-    r = await reassess(dict(base, issue_id=issue["id"], previous_assessment_id=f2["assessment_id"],
+    calls.clear()
+    subagent.run = broken_run
+    out = await reassess(dict(base, issue_id=issue["id"], previous_assessment_id=f2["assessment_id"],
+                              new_information=["it's started leaking from the front"]))
+    f3 = json.loads(out["content"][0]["text"])
+    check("subagent fails on re-invocation: reassessment_failed with the error, no fallback",
+          f3.get("status") == "reassessment_failed" and "SubagentError" in (f3.get("failure_reason") or "")
+          and assessments.latest_assessed(issue)["assessment_id"] == f1["assessment_id"],
+          str({k: f3.get(k) for k in ("status", "failure_reason", "source")}))
+    check("  ...the earlier unassessed information is carried forward as still new",
+          f3["brief"]["new_information"] == ["water left in the drum", "it's started leaking from the front"]
+          and "water left in the drum" not in f3["brief"]["resident_symptoms"],
+          str(f3["brief"]["new_information"]))
+    check("  ...and it counts towards the cap", assessments.reassessment_count(issue) == 2)
+
+    s.enter_loop(session.BOOKING)
+    out = await book_visit.handler({"issue_id": issue["id"], "visit_type": "repair",
+                                    "slot_date": "2026-09-30"})
+    visit = json.loads(out["content"][0]["text"])["booked"]
+    note = visit.get("engineer_note") or {}
+    check("the visit carries an engineer note built from the submitted assessment",
+          note.get("assessment_id") == f1["assessment_id"] and note.get("code") == f1["code"])
+    check("  ...saying it came from the backup rules and leading with the uncertainty",
+          note.get("from_backup_rules") is True and note.get("meets_threshold") is False
+          and note.get("headline", "").startswith("UNCERTAIN") and "backup rules" in note["headline"],
+          note.get("headline"))
+    check("  ...with the failed re-invocations' new information, marked as not assessed",
+          (note.get("not_assessed") or {}).get("new_information")
+          == ["water left in the drum", "it's started leaking from the front"]
+          and note["not_assessed"].get("attempts") == [f2["assessment_id"], f3["assessment_id"]],
+          str(note.get("not_assessed")))
+    subagent.run = fake_run
+    r = await reassess(dict(base, issue_id=issue["id"], previous_assessment_id=f3["assessment_id"],
                             new_information=["water left in the drum"]))
     check("once a visit is booked, the assessment can no longer be revisited",
           r.get("is_error") and "visit" in r["content"][0]["text"].lower())
@@ -736,6 +833,41 @@ async def main():
           not leaks, str(leaks))
     check("the DECISION prompt no longer asks the main agent for its own judgement",
           "your judgement" not in prompts.DECISION and "your confidence" not in prompts.DECISION)
+
+    # ---------------------------------------------------------------- Module 3 step 4
+    section("Fallback results are always below the threshold; the engineer is told (Module 3 step 4)")
+    from agent.tools import send_engineer_message
+    STORE.load_scenario("clear_repair")
+    s = session.set_current(session.IssueSession(json.loads(Path("scenarios/clear_repair.json").read_text())))
+    issue = STORE.active_issue()
+    KNOBS.use_llm_for_decision_analysis = False
+    fb = assessments.record(issue, issue["appliance_id"], dict(fallback_results["clear_repair"]))
+    check(f"a fallback at confidence {fb['confidence']} (above {KNOBS.confidence_threshold}) "
+          "does not meet the threshold", fb["confidence"] >= KNOBS.confidence_threshold
+          and fb["meets_threshold"] is False and "backup rules" in fb.get("threshold_note", ""))
+    s.enter_loop(session.DECISION)
+    await submit_recommendation.handler({"assessment_id": fb["assessment_id"]})
+    exit_payload = s.exits.get(session.DECISION) or {}
+    check("  ...submit_recommendation reports it below threshold too",
+          exit_payload.get("assessment_id") == fb["assessment_id"]
+          and exit_payload.get("meets_threshold") is False, str(exit_payload))
+    KNOBS.use_llm_for_decision_analysis = True
+    sub = give_recommendation("B")
+    check(f"a subagent result at {sub['confidence']} does meet it",
+          sub["confidence"] >= KNOBS.confidence_threshold
+          and assessments.meets_threshold(sub) is True and sub["meets_threshold"] is True)
+    issue["recommendation_assessment_id"] = fb["assessment_id"]
+    issue["assessments"] = [a for a in assessments.history(issue) if a is not sub]
+    task = asyncio.create_task(send_engineer_message.handler(
+        {"engineer_id": STORE.engineer_for_property(issue["property_id"])["id"],
+         "recommendation": "Repair", "rationale": "Main agent's words, no mention of source"}))
+    await asyncio.sleep(0)
+    ctx = s.pending_gate.context if s.pending_gate else {}
+    check("the engineer gate carries the assessment summary from the log, whatever the message says",
+          (ctx.get("assessment") or {}).get("from_backup_rules") is True
+          and "backup rules" in ctx["assessment"]["headline"], str(ctx.get("assessment"))[:200])
+    s.resolve_gate("confirm")
+    await task
 
     # ---------------------------------------------------------------- summary
     total, passed = len(results), sum(results)

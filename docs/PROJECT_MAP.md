@@ -36,7 +36,8 @@ Main agent — one session per issue (agent/runner.py)
          book_visit is held by a gate until the engineer (and PM, if over £400) approve;
          the gate reads the submitted code, not the visit type the main agent passes
          new fault info from the resident → reassess_repair_vs_replace (max 2; the
-         subagent may answer "no change"; a 3rd goes to ops with the history)
+         subagent may answer "no change"; if it fails, the earlier assessment stands and the
+         new info goes to the engineer on the visit; a 3rd goes to ops with the history)
 ```
 
 The escalation skill isn't a separate call. Its rules are copied by hand into the main agent's
@@ -52,13 +53,13 @@ own instructions (`agent/prompts.py`) so they apply from the first message.
 | `agent/reasoning.py` | The troubleshooting-steps AI call, and the shape every repair-vs-replace answer must have |
 | `agent/skills.py` | Reads the skill files and hands them to those calls |
 | `agent/assessments.py` | The assessment log. Each repair-vs-replace answer gets an ID; the main agent submits the ID, never its own numbers |
-| `agent/fallbacks.py` | Rules-based backup for both calls, used if the AI path is switched off or fails |
+| `agent/fallbacks.py` | Rules-based backup for both calls, used if the AI path is switched off or fails. Its results never count as confident, and the engineer is told they came from it. Not used on re-assessment |
 | `agent/gates.py` | The engineer / PM approval gate on booking |
 | `agent/trace.py` | Guardrails (e.g. the warranty block) and the decision log |
 | `agent/prompts.py` | Main agent instructions, including the escalation rules |
 | `skills/` | The three Module 2 skills + ten appliance fault references |
 | `scenarios/` | The 8 test cases |
-| `selftest.py` | 160 quick checks, free, no API key |
+| `selftest.py` | 183 quick checks, free, no API key |
 | `verify.py` | Runs scenarios against the real model — costs money |
 | `static/`, `server.py` | The browser demo |
 | `docs/` | PRD, this map, and `module2/` (submitted write-up, evidence, old prompts) |
@@ -81,7 +82,16 @@ Most relevant to Module 3 first.
 3. **Photos can't be supplied.** Nothing in the system handles them, so the "crack confirmed by
    photo" path in the skill can't be reached.
 4. **No guardrail has fired in a live run.** Routing was correct every time, so the backstops are untested.
-5. **The backup isn't truly "one source".** `fallbacks.py` keeps its own copy of the fault patterns.
+5. **The backup isn't truly "one source".** `fallbacks.py` keeps its own copy of the triage fault
+   patterns (11 faults; the reference files cover 55). A selftest now fails if a key has no
+   matching reference section, so the keys can't drift, but the steps themselves can. Deriving
+   them from the reference files would need either (a) a parser that turns the "Resident-safe
+   check" column into resident steps and filters out the unsafe rows, which are marked only in
+   wording ("—", "None — do not troubleshoot", gas rows on hobs when the hob type is unknown), or
+   (b) a structured "fallback steps" block added to each reference section and signed off by an
+   engineer, so the file holds the exact wording the fallback sends. (b) is safer; both touch
+   content that needs engineer review. The repair-vs-replace fallback already reads the
+   skill's determinative table directly (Module 3 step 4).
 6. **Four appliance types have no fault categories** in Iterum's data (washing machine, tumble
    dryer, microwave, wine cooler), so only their general guidance ever reaches the model.
 7. **Same-day booking.** The PRD's slot rule allows booking for this afternoon; a real version needs notice.

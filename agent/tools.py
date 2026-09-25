@@ -242,9 +242,13 @@ async def assess_repair_vs_replace(args):
 
 
 async def _run_assessment(tool_name: str, appliance: dict, brief: dict) -> dict:
-    """The subagent, or the heuristic if it is switched off or fails. Table-shaped result."""
+    """First assessment: the subagent, or the heuristic if it is switched off or fails."""
     age = STORE.appliance_age_years(appliance)
     repair, replace = brief["estimated_repair_cost"], brief["estimated_replacement_cost"]
+
+    def heuristic():
+        return assess_heuristic(age, repair, replace, brief["in_warranty"],
+                                fault_slug=brief["fault_slug"])
 
     use_llm = KNOBS.use_llm_for_decision_analysis
     BUS.publish("reasoning_path", tool=tool_name, path="llm" if use_llm else "fallback")
@@ -256,10 +260,14 @@ async def _run_assessment(tool_name: str, appliance: dict, brief: dict) -> dict:
             BUS.publish("reasoning_path", tool=tool_name, path="fallback",
                         detail=f"Subagent failed, fell back to the heuristic: "
                                f"{type(exc).__name__}: {exc}")
-            result = assess_heuristic(age, repair, replace, brief["in_warranty"])
+            result = heuristic()
     else:
-        result = assess_heuristic(age, repair, replace, brief["in_warranty"])
+        result = heuristic()
+    return _with_record_fields(result, brief)
 
+
+def _with_record_fields(result: dict, brief: dict) -> dict:
+    repair, replace = brief["estimated_repair_cost"], brief["estimated_replacement_cost"]
     result["estimated_repair_cost"] = repair
     result["estimated_replacement_cost"] = replace
     # Exactly what the subagent was given, so the log shows what the judgement rests on.
@@ -320,18 +328,38 @@ async def reassess_repair_vs_replace(args):
     appliance = STORE.appliance(issue["appliance_id"])
     brief = subagent.build_reinvocation_brief(issue, appliance, previous,
                                               args["new_information"])
-    result = await _run_assessment("reassess_repair_vs_replace", appliance, brief)
 
-    if "no_change_reason" in result and "code" not in result:
+    # No fallback on re-invocation (spec: "When it's called"). The heuristic never reads the
+    # new information, so its answer would be a "new" assessment resting on nothing new -
+    # and submitting it would clear the engineer's and PM's approvals for no reason.
+    failure = None
+    if not KNOBS.use_llm_for_decision_analysis:
+        failure = "the subagent is switched off, and the fallback does not re-assess"
+        BUS.publish("reasoning_path", tool="reassess_repair_vs_replace", path="none",
+                    detail="Subagent switched off; the fallback is not run on re-invocation.")
+    else:
+        BUS.publish("reasoning_path", tool="reassess_repair_vs_replace", path="llm")
+        try:
+            result = _with_record_fields(await subagent.run(brief), brief)
+        except Exception as exc:  # noqa: BLE001 - the previous assessment stands instead
+            failure = f"subagent failed: {type(exc).__name__}: {exc}"
+            BUS.publish("reasoning_path", tool="reassess_repair_vs_replace", path="none",
+                        detail=f"{failure}. The previous assessment stands; the fallback "
+                               "is not run on re-invocation.")
+
+    if failure:
+        entry = subagent.reassessment_failed(previous, failure)
+        entry["brief"] = brief
+        entry["relevance_check"] = "not performed (re-assessment failed)"
+        status = "reassessment_failed"
+    elif "no_change_reason" in result and "code" not in result:
         entry = subagent.no_change(previous, result["no_change_reason"])
         entry["brief"] = brief
         entry["relevance_check"] = "not about the appliance or fault (subagent)"
         status = "no_change"
     else:
         entry = result
-        entry["relevance_check"] = (
-            "about the appliance or fault (subagent re-assessed)"
-            if result["source"] == "subagent" else "not performed (fallback)")
+        entry["relevance_check"] = "about the appliance or fault (subagent re-assessed)"
         status = "assessed"
     entry["reassesses"] = previous["assessment_id"]
     assessment = assessments.record(issue, appliance["id"], entry, status=status)
@@ -339,13 +367,16 @@ async def reassess_repair_vs_replace(args):
 
     used = assessments.reassessment_count(issue)
     remaining = assessments.MAX_REASSESSMENTS - used
+    submitted = issue.get("recommendation_assessment_id")
+    stands = (f"The submitted recommendation ({submitted}) stands; carry on." if submitted else
+              f"Submit {assessments.latest_assessed(issue)['assessment_id']} with "
+              "submit_recommendation.")
     if status == "no_change":
-        submitted = issue.get("recommendation_assessment_id")
-        nxt = ("The new information is not about the appliance or fault, so nothing "
-               "changes. " + (f"The submitted recommendation ({submitted}) stands; carry on."
-                              if submitted else
-                              f"Submit {assessments.latest_assessed(issue)['assessment_id']} "
-                              "with submit_recommendation."))
+        nxt = "The new information is not about the appliance or fault, so nothing changes. " + stands
+    elif status == "reassessment_failed":
+        nxt = ("The re-assessment could not be run, so there is no new assessment and nothing "
+               "to resubmit. " + stands + " The resident's new information is recorded and "
+               "will reach the engineer with the visit. This attempt counts towards the limit.")
     else:
         nxt = (f"Submit {assessment['assessment_id']} with submit_recommendation before "
                "booking anything, then follow the booking rules for its code.")
@@ -355,7 +386,7 @@ async def reassess_repair_vs_replace(args):
 def _history_line(a: dict) -> dict:
     return {k: a.get(k) for k in ("assessment_id", "status", "source", "code", "confidence",
                                   "rationale", "reassesses", "relevance_check",
-                                  "no_change_reason", "refusal_reason")
+                                  "no_change_reason", "refusal_reason", "failure_reason")
             if a.get(k) is not None} | {"new_information": (a.get("brief") or {})
                                         .get("new_information", [])}
 
@@ -439,6 +470,11 @@ async def book_visit(args):
         "slot_date": args["slot_date"],
         "status": "provisional",
     }
+    # What the engineer is told about the recommendation, built from the submitted
+    # assessment by code - including whether it came from the backup rules.
+    note = assessments.engineer_note(issue)
+    if note:
+        visit["engineer_note"] = note
     STORE.add_visit(visit)
     BUS.publish("visit", action="booked", visit=visit)
     return ok({"booked": visit, "next": "Call confirm_visit once the resident has accepted."})
@@ -491,6 +527,8 @@ async def send_engineer_message(args):
             "engineer": engineer, "channel": KNOBS.engineer_channel,
             "recommendation": args["recommendation"], "rationale": args["rationale"],
             "issue_id": s.issue_id,
+            # From the log, not the main agent's message, so the source cannot be left out.
+            "assessment": assessments.engineer_note(STORE.active_issue()),
         },
     )
     BUS.publish("gate_opened", gate="engineer", context=gate.context)
@@ -635,7 +673,7 @@ async def submit_recommendation(args):
                "code": code, "confidence": confidence,
                "rationale": assessment["rationale"],
                "code_meaning": assessment["code_meaning"],
-               "meets_threshold": confidence >= KNOBS.confidence_threshold,
+               "meets_threshold": assessments.meets_threshold(assessment),
                "threshold": KNOBS.confidence_threshold,
                "iterations": s.loop_iteration}
     s.record_exit(session.DECISION, payload)
@@ -647,6 +685,8 @@ async def submit_recommendation(args):
     BUS.publish("loop_exit", loop=session.DECISION, **payload)
     msg = (f"Assessment {assessment_id} submitted: code {code} at confidence "
            f"{confidence:.2f} (threshold {KNOBS.confidence_threshold:.2f}).")
+    if assessment["source"] == "fallback":
+        msg += " " + assessments.FALLBACK_BELOW_THRESHOLD
     if previous_id and previous_id != assessment_id:
         msg += (f" It replaces {previous_id}. Booking now follows code {code}: "
                 + ("a replacement, so the engineer must confirm it (and the PM approve the "

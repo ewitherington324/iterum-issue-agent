@@ -13,7 +13,7 @@ Module 3 work follows docs/module3/SUBAGENT_SPEC.md. If the code and the spec di
 
 ```bash
 ./run.sh                              # http://localhost:8000
-.venv/bin/python selftest.py          # 160 checks, no API key, ~1s — use this constantly
+.venv/bin/python selftest.py          # 183 checks, no API key, ~1s — use this constantly
 .venv/bin/python verify.py            # all 8 scenarios against the real model (~$3)
 .venv/bin/python verify.py self_fix   # one scenario, verbose trace (~$0.15–0.70)
 ```
@@ -84,7 +84,8 @@ agent/subagent.py   the repair-vs-replace subagent: input filter, warranty/refer
 agent/gates.py      can_use_tool — the engineer/PM approval gate on book_visit
 agent/trace.py      PreToolUse/PostToolUse hooks — trace, guardrails, decision log
 agent/prompts.py    system prompt + per-loop instructions
-agent/fallbacks.py  rules-based path for the A/B (fault lookup + age/cost heuristic)
+agent/fallbacks.py  rules-based path for the A/B (fault lookup + age/cost heuristic, which reads
+                    the skill's determinative table). First assessment only; never on re-invocation
 agent/reasoning.py  the triage reasoning call, and the RepairVsReplace output model
 agent/assessments.py the repair-vs-replace assessment log; submit_recommendation reads from it by ID
 agent/config.py     KNOBS — the PRD's open questions, live-editable from the UI
@@ -142,9 +143,13 @@ before publishing anything from this repo anywhere public.
   category in `data/taxonomy.json`, so no `fault_slug` will ever match them and only the file
   preamble reaches the model. Either the portfolio has these types and they have logged no
   issues, or the scope list is wider than reality. Unresolved.
-- `FAULT_PATTERNS` in `fallbacks.py` and the slug-keyed reference files are now keyed the same
-  way but remain two separate sources. Deriving the former from the latter is what would make
-  PRD 4.1's "one source, cannot drift" claim literally true.
+- `FAULT_PATTERNS` in `fallbacks.py` and the slug-keyed reference files remain two separate
+  sources. `selftest.py` fails if a key has no matching reference section, which stops the keys
+  drifting but not the content. What real single-sourcing would need is PROJECT_MAP open issue #5.
+- A fallback assessment never meets the confidence threshold, whatever its computed number
+  (`assessments.meets_threshold`). What the engineer is told about a recommendation — source,
+  uncertainty, unassessed new information — is built by code (`assessments.engineer_note`), on
+  the visit and in the engineer-gate context, never taken from the main agent's message.
 - The fault content under `skills/iterum-triage-steps/references/` is general appliance
   knowledge, not Iterum service data — every file carries a status banner saying so. It needs
   engineer sign-off before it reaches a resident, the engineer-only signal rows most of all.

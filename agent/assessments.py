@@ -25,7 +25,9 @@ TABLE_FIELDS = (
     "contra_indicators", "determinative", "confidence_basis",
 )
 
-STATUSES = {"assessed", "no_change", "refused"}
+# reassessment_failed: a re-invocation whose subagent run failed. No fallback runs on
+# re-invocation, so the previous assessment stands and nothing new can be submitted.
+STATUSES = {"assessed", "no_change", "refused", "reassessment_failed"}
 SOURCES = {"subagent", "fallback"}
 
 # Spec, "When it's called": at most two re-invocations per issue; a third goes to ops.
@@ -55,11 +57,89 @@ def latest_assessed(issue: dict) -> dict | None:
 
 
 def reassessment_count(issue: dict) -> int:
-    """Re-invocations that reached the subagent (or its fallback), assessed or no_change.
+    """Re-invocations that reached the subagent: assessed, no_change or reassessment_failed.
 
     Input the filter rejected is never recorded, so it cannot count.
     """
     return sum(1 for a in history(issue) if a.get("reassesses"))
+
+
+def meets_threshold(assessment: dict) -> bool:
+    """Whether a submitted recommendation may route as confident, at the current threshold.
+
+    A fallback result never does, whatever its computed confidence (spec: "Fallback"): a
+    lookup table cannot judge its own certainty the way the subagent can.
+    """
+    return (assessment.get("status") == "assessed"
+            and assessment.get("source") != "fallback"
+            and assessment["confidence"] >= KNOBS.confidence_threshold)
+
+
+FALLBACK_BELOW_THRESHOLD = ("From the backup rules (rules-based fallback), so treated as below "
+                            "the threshold whatever its computed confidence.")
+
+
+def unassessed_information(issue: dict) -> list[dict]:
+    """New information from failed re-invocations since the submitted assessment.
+
+    The subagent never judged it, so the engineer needs to see it as it was said.
+    """
+    log = history(issue)
+    submitted = issue.get("recommendation_assessment_id")
+    idx = next((i for i, a in enumerate(log) if a["assessment_id"] == submitted), -1)
+    return [{"assessment_id": a["assessment_id"], "failure": a.get("failure_reason"),
+             "new_information": list(a["brief"].get("new_information") or [])}
+            for a in log[idx + 1:] if a["status"] == "reassessment_failed"]
+
+
+def summary(assessment: dict) -> dict:
+    """What the engineer is told about a recommendation - built by code, never the main agent."""
+    fallback = assessment["source"] == "fallback"
+    meets = meets_threshold(assessment)
+    if fallback:
+        headline = ("UNCERTAIN - from the backup rules, not the subagent. " +
+                    FALLBACK_BELOW_THRESHOLD)
+    elif not meets:
+        headline = (f"UNCERTAIN - confidence {assessment['confidence']:.2f} is below the "
+                    f"{KNOBS.confidence_threshold:.2f} threshold.")
+    else:
+        headline = (f"Confidence {assessment['confidence']:.2f} meets the "
+                    f"{KNOBS.confidence_threshold:.2f} threshold.")
+    return {
+        "headline": headline,
+        "assessment_id": assessment["assessment_id"],
+        "source": assessment["source"],
+        "from_backup_rules": fallback,
+        "code": assessment["code"],
+        "code_meaning": RECOMMENDATION_CODES.get(assessment["code"], "unknown"),
+        "confidence": assessment["confidence"],
+        "meets_threshold": meets,
+        "determinative": assessment.get("determinative", False),
+        "rationale": assessment["rationale"],
+        "evidence_missing": list(assessment.get("evidence_missing") or []),
+        "limits_applied": list(assessment.get("limits_applied") or []),
+        "provisional": "Provisional routing, not a diagnosis.",
+    }
+
+
+def engineer_note(issue: dict) -> dict | None:
+    """The note book_visit attaches to a visit: the submitted assessment's summary plus any
+    new information a failed re-invocation could not assess."""
+    submitted = find(issue, issue.get("recommendation_assessment_id") or "")
+    if submitted is None:
+        return None
+    note = summary(submitted)
+    unassessed = unassessed_information(issue)
+    if unassessed:
+        note["not_assessed"] = {
+            "detail": ("The resident said this after the assessment. The re-assessment could "
+                       "not be run, so it has not been assessed - check it on site."),
+            # A later failed attempt carries the earlier one's quotes forward, so dedupe.
+            "new_information": list(dict.fromkeys(q for u in unassessed
+                                                  for q in u["new_information"])),
+            "attempts": [u["assessment_id"] for u in unassessed],
+        }
+    return note
 
 
 def escalate(issue: dict, attempted: dict) -> dict:
@@ -126,9 +206,11 @@ def record(issue: dict, appliance_id: str, result: dict,
     if status == "assessed":
         cap = enforce_reported_limits(assessment)
         assessment["code_meaning"] = RECOMMENDATION_CODES.get(assessment["code"], "unknown")
-        assessment["meets_threshold"] = assessment["confidence"] >= KNOBS.confidence_threshold
+        assessment["meets_threshold"] = meets_threshold(assessment)
+        if assessment["source"] == "fallback":
+            assessment["threshold_note"] = FALLBACK_BELOW_THRESHOLD
     else:
-        # A refusal or a no-change carries no recommendation of its own.
+        # A refusal, a no-change or a failed re-assessment carries no recommendation of its own.
         cap = None
         assessment["code_meaning"] = None
         assessment["meets_threshold"] = False

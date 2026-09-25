@@ -282,6 +282,8 @@ function renderGates() {
       add("Channel", ctx.channel);
       add("Recommendation", ctx.recommendation);
       if (ctx.rationale) add("Rationale", ctx.rationale);
+      // Written by code from the assessment log, so the source is always shown.
+      if (ctx.assessment) add("From the log", ctx.assessment.headline);
     } else {
       add("To", ctx.to);
       add("Subject", ctx.subject);
@@ -349,6 +351,13 @@ function renderGates() {
       row.appendChild(el("span", `pill ${v.status === "confirmed" ? "green" : "grey"}`, v.status));
       row.appendChild(el("span", null, ` ${v.type} — ${v.slot_date} (${v.id})`));
       card.appendChild(row);
+      const n = v.engineer_note;
+      if (n) {
+        card.appendChild(el("div", "note", `Engineer note: ${n.headline}`));
+        if (n.not_assessed)
+          card.appendChild(el("div", "note",
+            `Not assessed: ${n.not_assessed.new_information.map((q) => `"${q}"`).join("; ")}`));
+      }
     });
     p.appendChild(card);
   }

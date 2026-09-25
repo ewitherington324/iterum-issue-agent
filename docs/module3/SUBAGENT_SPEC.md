@@ -126,7 +126,7 @@ One assessment, logged with its own ID:
 | Field | What it holds |
 |---|---|
 | `assessment_id` | Unique per assessment |
-| `status` | `assessed`, `no_change` or `refused` |
+| `status` | `assessed`, `no_change`, `refused` or `reassessment_failed` |
 | `code` | The recommendation code, as defined in `agent/config.py` |
 | `confidence` | 0–1 |
 | `rationale` | Plain-language reasoning, usable in the engineer brief |
@@ -193,7 +193,7 @@ twice per issue. A third attempt goes to ops instead, with the assessment histor
   `no_change` cannot be submitted, so the recommendation already submitted stands. If it is
   relevant, it re-assesses and exits with `submit_assessment` as usual.
 - **What counts.** Every re-invocation that reaches the subagent counts towards the cap, whether
-  it ends `assessed` or `no_change`. Input rejected by the filter (not verbatim, a verdict, a
+  it ends `assessed`, `no_change` or `reassessment_failed`. Input rejected by the filter (not verbatim, a verdict, a
   stale previous ID) never reached the subagent and does not count.
 - **The cap.** On a third attempt the subagent is not run. Code raises the ops request itself,
   with the full assessment history attached, rather than relying on the main agent to include
@@ -201,9 +201,14 @@ twice per issue. A third attempt goes to ops instead, with the assessment histor
   and submitting for the rest of it.
 - **A new assessment in booking** must be submitted with `submit_recommendation` before booking
   continues; the gate refuses a booking on a superseded assessment.
-- **Fallback on re-invocation.** The rules-based fallback ignores resident statements, so it
-  cannot judge relevance honestly. It re-runs and is recorded `assessed` with
-  `relevance_check: not performed (fallback)`. Finished in build step 4.
+- **No fallback on re-invocation.** The rules-based fallback ignores resident statements, so
+  re-running it on new information would produce a "new" assessment that never read the new
+  information, and submitting it would clear approvals for nothing. So on re-invocation the
+  fallback is not run. If the subagent fails (or the LLM path is switched off), the attempt is
+  logged with status `reassessment_failed` and the reason; the previous assessment stands; no new
+  assessment exists, so nothing needs resubmitting and no approvals are cleared. The attempt
+  counts towards the cap. Its new information is not lost: it goes into the engineer note on the
+  visit (see Fallback), and is carried into the next re-invocation as still-new information.
 
 ## Fallback
 
@@ -213,11 +218,37 @@ rules-based fallback runs instead and returns the same fields, with two differen
 - `source` is `fallback`, so the log always shows which path produced the recommendation.
 - Its recommendations are always treated as below the 0.7 threshold. A lookup table can't judge
   its own certainty the way the subagent can, so it shouldn't trigger autonomous routing. A
-  fallback repair still books, but the engineer is told it came from the backup rules.
+  fallback repair still books, but the engineer is told it came from the backup rules. Its
+  computed confidence is kept as it is; `meets_threshold` is false whatever the number.
 
-The fallback should read fault patterns from the same reference files rather than its own copy
-(open issue #5). Check how structured those files are before changing this, and report back
-if it's not straightforward.
+It weighs age and cost, with one exception: it reads the skill's **determinative faults** table
+(`skills/iterum-repair-vs-replace/SKILL.md`) and, when the issue's fault category is listed there,
+returns that code with `determinative: true` rather than weighing. Confidence is then capped per
+the skill's limits for that fault; with no photo handling in Module 3, that is the skill's
+"photo not supplied" limit (0.6), recorded in `limits_applied`. A cracked hob is code A on the
+fallback path as on the subagent path. Like the subagent, it must give `contra_indicators` unless
+determinative.
+
+It is used for a first assessment only; on re-invocation it is not run (see "When it's called").
+
+**Telling the engineer.** Code, not the main agent, writes what the engineer sees about the
+assessment:
+
+- **On the visit.** `book_visit` attaches an engineer note built from the submitted assessment:
+  source, code, confidence and whether it met the threshold (leading with the uncertainty when it
+  did not, and saying plainly when it came from the backup rules), evidence missing, limits
+  applied, and any new information from a `reassessment_failed` attempt since that assessment,
+  marked as not assessed.
+- **At the engineer gate.** The gate context carries the same assessment summary, whatever the
+  main agent wrote in its message.
+
+**Reference files (open issue #5).** Checked in build step 4. The fallback's triage fault
+patterns stay in `fallbacks.py`. The reference files' checks are guidance written for the model
+("ask what the display shows"), and which rows are unsafe for a resident is marked only in
+wording ("—", "None — do not troubleshoot", gas rows on hobs where the technology is unknown), so
+deriving resident steps from them means filtering safety rules out of prose. Instead `selftest.py`
+fails if any `FAULT_PATTERNS` key has no matching reference section. Real single-sourcing is
+recorded as open issue #5 in `PROJECT_MAP.md`.
 
 ## How we'll know it works
 
@@ -248,5 +279,7 @@ One short Claude Code session per step, commit after each.
    repair-vs-replace skill is loaded only into the assessment, never the main agent.
 2. Subagent with filtered inputs, its two tools and the warranty guard.
 3. Re-invocation with the fault-relevance check and the cap of two.
-4. Fallback returning the same fields; check the reference files for issue #5.
+4. Fallback returning the same fields, below threshold, reading the determinative table; engineer
+   note on the visit and at the gate; no fallback on re-invocation; check the reference files for
+   issue #5.
 5. Threshold to 0.7; selftest checks; new scenarios; repeated `verify.py` runs.

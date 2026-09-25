@@ -124,6 +124,46 @@ def fault_reference(appliance_type: str, fault_slug: str | None) -> str | None:
     return f"{preamble}\n\n{section}".strip()
 
 
+_DETERMINATIVE_SECTION = re.compile(r"^## Determinative faults\n(.*?)(?=^## |\Z)", re.M | re.S)
+_TABLE_ROW = re.compile(r"^\|(.+)\|\s*$", re.M)
+
+
+@lru_cache(maxsize=None)
+def determinative_faults() -> dict[str, dict]:
+    """The decision skill's fixed-outcome table, keyed by taxonomy slug.
+
+    Read from the skill so the rules-based fallback follows the same list the subagent does -
+    an engineer's edit to the table changes both. Each row names its slug in backticks and its
+    code in bold. A table that parses to nothing raises rather than leaving the fallback
+    weighing a cracked hob as a repair.
+    """
+    text = load_skill(DECISION_SKILL)
+    section = _DETERMINATIVE_SECTION.search(text)
+    out: dict[str, dict] = {}
+    for row in _TABLE_ROW.finditer(section.group(1) if section else ""):
+        cells = [c.strip() for c in row.group(1).split("|")]
+        if len(cells) < 3:
+            continue
+        slug = re.search(r"`([a-z0-9_]+)`", cells[0])
+        code = re.search(r"\*\*([A-D])\*\*", cells[1])
+        if slug and code:
+            fault = re.sub(r"\*\*(.+?)\*\*.*", r"\1", cells[0])
+            out[slug.group(1)] = {"code": code.group(1), "fault": fault, "why": cells[2]}
+    if not out:
+        raise SkillNotFound(f"No determinative faults could be read from {DECISION_SKILL}")
+    return out
+
+
+def reference_sections() -> set[str]:
+    """Every slug with a section in any reference file. Used by selftest."""
+    out: set[str] = set()
+    for filename in set(_REFERENCE_FILES.values()):
+        path = SKILLS_DIR / TRIAGE_SKILL / "references" / filename
+        if path.is_file():
+            out |= set(_split_sections(path.read_text(encoding="utf-8"))[1])
+    return out
+
+
 def reference_coverage() -> dict[str, int]:
     """How many slug sections each reference file carries. Used by selftest."""
     out = {}

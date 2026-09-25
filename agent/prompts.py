@@ -166,7 +166,7 @@ the result and hand the thread to ops."""
 BOOKING = """The repair-vs-replace assessment is logged as {assessment_id}:
 
   Code {code} - {code_meaning}
-  Confidence {confidence} (threshold {threshold})
+  Confidence {confidence} (threshold {threshold}) - {threshold_status}
   {rationale}
 
 Run the BOOKING loop.
@@ -189,9 +189,9 @@ fault - a symptom, something they saw, heard or tried - call reassess_repair_vs_
 latest assessment_id and their new words, copied exactly. Do not use it for scheduling, \
 complaints or because you would prefer a different answer. If it comes back with a new \
 assessment, submit that with submit_recommendation before booking, and follow the rules above \
-for its code - earlier approvals do not carry over. If it comes back no_change, carry on as \
-before. It can be used at most twice; a third time sends the thread to ops, and the result will \
-tell you what to do.
+for its code - earlier approvals do not carry over. If it comes back no_change or \
+reassessment_failed, there is no new assessment: carry on as before. It can be used at most \
+twice; a third time sends the thread to ops, and the result will tell you what to do.
 
 When the resident accepts, book the visit and confirm it. Then tell them what is happening and \
 when, and close the job.

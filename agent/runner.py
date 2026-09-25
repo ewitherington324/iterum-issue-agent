@@ -159,6 +159,11 @@ async def run_scenario(scenario_id: str, auto_play: bool = True) -> dict:
                 code=decision["code"],
                 code_meaning=RECOMMENDATION_CODES.get(decision["code"], "unknown"),
                 confidence=decision["confidence"],
+                threshold_status=(
+                    "from the backup rules, so treated as below the threshold"
+                    if decision["source"] == "fallback" else
+                    "meets the threshold" if decision["meets_threshold"] else
+                    "below the threshold"),
                 threshold=KNOBS.confidence_threshold,
                 rationale=decision["rationale"],
                 pm_threshold=KNOBS.pm_cost_threshold_gbp,

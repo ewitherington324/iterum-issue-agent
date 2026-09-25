@@ -4,12 +4,19 @@ The PRD specifies that both LLM calls have a deterministic fallback so the syste
 A/B'd against the LLM path: a lookup of common fault patterns per appliance type, and a
 simple age/cost heuristic. The demo can switch between them live.
 
+The heuristic reads one thing from the decision skill: its determinative-faults table, so a
+fixed-outcome fault gets the same code on both paths. It is used for a first assessment
+only - on re-invocation it is not run (docs/module3/SUBAGENT_SPEC.md, "When it's called").
+
 The heuristic constants are Iterum's own, from the decision-analysis brief: a repair
 costing more than ~70% of replacement is beyond economic repair, and an appliance older
 than 7 years has low remaining future value.
 """
 
+from __future__ import annotations
+
 from .config import BER_COST_RATIO, LOW_FUTURE_VALUE_AGE_YEARS
+from .skills import determinative_faults
 
 # --- Fault-pattern lookup ------------------------------------------------------------
 # Every step must be resident-safe (PRD section 7): no electrical work, no disassembly,
@@ -105,6 +112,14 @@ def lookup_triage_steps(fault_slug: str, appliance_type: str) -> dict:
 
 # --- Age / cost heuristic -------------------------------------------------------------
 
+# The skill's limit for a determinative fault whose photo was requested and not supplied:
+# "assess at 0.6 or below". Photos cannot be supplied in Module 3, so on this path it always
+# applies. selftest checks the skill still says so.
+FIXED_OUTCOME_NO_PHOTO_LIMIT = 0.6
+
+BACKUP_RULES = "Rules-based fallback (the backup rules, not the subagent)"
+
+
 def _confidence(margin: float) -> float:
     """Map a normalised distance-from-boundary onto a confidence.
 
@@ -116,30 +131,65 @@ def _confidence(margin: float) -> float:
     return round(min(0.60 + 0.40 * (margin ** 0.5), 0.97), 2)
 
 
+def _fixed_outcome(slug: str, fault: dict, inputs: dict) -> dict:
+    """The skill's determinative table decides the code; the six factors do not apply."""
+    limit = FIXED_OUTCOME_NO_PHOTO_LIMIT
+    return {
+        "source": "fallback",
+        "code": fault["code"], "confidence": limit,
+        "confidence_basis": ("fixed: the skill's limit for a determinative fault with no "
+                             "photo, not computed from age or cost"),
+        "rationale": (f"{BACKUP_RULES}. Fault category {slug} ({fault['fault']}) is on the "
+                      f"skill's determinative list, so the code is {fault['code']} whatever "
+                      "the appliance's age or the repair cost. Provisional routing, not a "
+                      "diagnosis: the fault is as reported and has not been confirmed."),
+        "evidence_used": [f"Fault category {slug} - on the skill's determinative list"],
+        "evidence_missing": [
+            "A photo confirming the fault - photos cannot be supplied in Module 3",
+            "Triage evidence - not considered by the rules-based path",
+        ],
+        "limits_applied": [{"limit": limit, "reason": (
+            "Determinative fault with no photo: the skill caps confidence at "
+            f"{limit} until the fault is confirmed")}],
+        "contra_indicators": [
+            "The fault category is taken as reported; nothing on this path confirms it, and "
+            "a lesser fault (a scratch or mark rather than damage) would not be determinative",
+        ],
+        "determinative": True,
+        "inputs": {**inputs, "fault_slug": slug, "determinative_fault": fault["fault"]},
+    }
+
+
 def assess_heuristic(age_years: float, repair_cost: float, replacement_cost: float,
-                     in_warranty: bool) -> dict:
+                     in_warranty: bool, fault_slug: str | None = None) -> dict:
     """Deterministic repair-vs-replace call.
 
-    Returns the A/B/C/D code plus a confidence derived from how far the inputs sit from
+    Returns the A/B/C code plus a confidence derived from how far the inputs sit from
     the decision boundaries. That is a genuinely different quantity from a model's
     self-reported confidence, which is why the decision log records which basis was used.
-    """
+    Whatever the number, a fallback result is treated as below the threshold
+    (assessments.meets_threshold).
 
+    The one exception to weighing is the skill's determinative table: a listed fault
+    category sets the code on its own, as it does for the subagent.
+    """
     if in_warranty:
-        return {
-            "source": "fallback",
-            "code": "D", "confidence": 1.0,
-            "confidence_basis": "deterministic: warranty status is a fact, not an estimate",
-            "rationale": "Appliance is inside its manufacturer warranty, so the OEM handles it.",
-            "evidence_used": ["Appliance is inside its manufacturer warranty"],
-            "evidence_missing": [],
-            "limits_applied": [],
-            "contra_indicators": [],
-            "determinative": False,
-            "inputs": {"age_years": age_years, "in_warranty": True},
-        }
+        # The warranty guard refuses these before any assessment runs. Reaching here means
+        # that guard was bypassed, which should fail loudly, not return a confident D.
+        raise ValueError("an in-warranty appliance never reaches the repair-vs-replace "
+                         "fallback; the warranty guard refuses it")
 
     ratio = repair_cost / replacement_cost if replacement_cost else 0.0
+    inputs = {
+        "age_years": age_years, "repair_cost": repair_cost,
+        "replacement_cost": replacement_cost, "cost_ratio": round(ratio, 3),
+        "ber_threshold": BER_COST_RATIO,
+        "age_threshold_years": LOW_FUTURE_VALUE_AGE_YEARS,
+    }
+
+    fixed = determinative_faults().get(fault_slug or "")
+    if fixed:
+        return _fixed_outcome(fault_slug, fixed, inputs)
 
     cost_says_replace = ratio > BER_COST_RATIO
     age_says_replace = age_years > LOW_FUTURE_VALUE_AGE_YEARS
@@ -151,6 +201,14 @@ def assess_heuristic(age_years: float, repair_cost: float, replacement_cost: flo
     age_under = (LOW_FUTURE_VALUE_AGE_YEARS - age_years) / LOW_FUTURE_VALUE_AGE_YEARS
 
     agreement = False
+    # The fault was never looked at, which argues against any code this path gives.
+    unseen_fault = ("The fault itself was not considered - a replace-leaning fault (motor, "
+                    "compressor, control board) or a cheap part-fix found on site would "
+                    "change this")
+    age_line = (f"The appliance is {age_years:.1f} years old against the "
+                f"{LOW_FUTURE_VALUE_AGE_YEARS}-year line")
+    cost_line = (f"Repair is {ratio:.0%} of replacement against the {BER_COST_RATIO:.0%} "
+                 "beyond-economic-repair boundary")
 
     if cost_says_replace and age_says_replace:
         # Two independent signals agree. Beyond-economic-repair is the stronger claim,
@@ -162,21 +220,27 @@ def assess_heuristic(age_years: float, repair_cost: float, replacement_cost: flo
                      f"beyond-economic-repair threshold, and the appliance is {age_years:.1f} "
                      f"years old, past the {LOW_FUTURE_VALUE_AGE_YEARS}-year low-future-value "
                      "threshold. Both signals point to replacement.")
+        contra = [unseen_fault]
     elif cost_says_replace:
         code, margin = "A", cost_over
         rationale = (f"Repair at GBP {repair_cost:.0f} is {ratio:.0%} of the GBP "
                      f"{replacement_cost:.0f} replacement cost, above the {BER_COST_RATIO:.0%} "
                      "beyond-economic-repair threshold.")
+        contra = [f"{age_line}, so it still has future value", unseen_fault]
     elif age_says_replace:
         code, margin = "C", age_over
         rationale = (f"Repair is economic at {ratio:.0%} of replacement, but the appliance is "
                      f"{age_years:.1f} years old, past the {LOW_FUTURE_VALUE_AGE_YEARS}-year "
                      "low-future-value threshold, so remaining value is limited.")
+        contra = [f"{cost_line}, so the repair itself is economic", unseen_fault]
     else:
         code = "B"
         margin = min(cost_under, age_under)
         rationale = (f"Repair at GBP {repair_cost:.0f} is {ratio:.0%} of replacement and the "
                      f"appliance is {age_years:.1f} years old, inside both thresholds.")
+        # Whichever boundary is closer is the stronger case for replacing.
+        contra = [(f"{age_line} - the nearer boundary" if age_under <= cost_under
+                   else f"{cost_line} - the nearer boundary"), unseen_fault]
 
     confidence = _confidence(margin)
     if agreement:
@@ -188,11 +252,8 @@ def assess_heuristic(age_years: float, repair_cost: float, replacement_cost: flo
         "confidence": confidence,
         "confidence_basis": ("computed: distance from the cost-ratio and age decision "
                              "boundaries" + (", two signals in agreement" if agreement else "")),
-        "rationale": rationale,
-        "evidence_used": [
-            f"{age_years:.1f} years old against the {LOW_FUTURE_VALUE_AGE_YEARS}-year line",
-            f"Repair {ratio:.0%} of replacement against the {BER_COST_RATIO:.0%} boundary",
-        ],
+        "rationale": f"{BACKUP_RULES}. {rationale}",
+        "evidence_used": [f"{age_line}", f"{cost_line}"],
         # The rules-based path weighs age and cost only. Saying so is the honest version
         # of evidence_missing here - the fault itself was never looked at.
         "evidence_missing": [
@@ -200,14 +261,8 @@ def assess_heuristic(age_years: float, repair_cost: float, replacement_cost: flo
             "Comparable past jobs - not considered by the rules-based path",
         ],
         "limits_applied": [],
-        "contra_indicators": [],
+        "contra_indicators": contra,
         "determinative": False,
-        "inputs": {
-            "age_years": age_years, "repair_cost": repair_cost,
-            "replacement_cost": replacement_cost, "cost_ratio": round(ratio, 3),
-            "ber_threshold": BER_COST_RATIO,
-            "age_threshold_years": LOW_FUTURE_VALUE_AGE_YEARS,
-            "cost_says_replace": cost_says_replace,
-            "age_says_replace": age_says_replace,
-        },
+        "inputs": {**inputs, "cost_says_replace": cost_says_replace,
+                   "age_says_replace": age_says_replace},
     }
