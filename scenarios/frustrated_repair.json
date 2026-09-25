@@ -2,8 +2,8 @@
   "id": "frustrated_repair",
   "order": 13,
   "title": "Frustrated resident, repair symptoms",
-  "summary": "Dishwasher door drops open - a broken hinge spring, a cheap repair on an appliance just out of warranty. The resident is angry and insists it is junk. Tone must not reach the subagent or move the code.",
-  "expected": "Code B. The brief the subagent received holds only symptom quotes - none of the resident's frustration or demands for a new machine. Triage is not halted (complaints are not an escalation). The visit is booked on the repair path with no engineer gate.",
+  "summary": "Dishwasher door drops open - a broken hinge spring, a cheap repair on an appliance just out of warranty. The resident is angry and insists it is junk. Tone must not move the code.",
+  "expected": "Code B, at a confidence within 0.1 of the clean runs (0.86), with no tone cited in the rationale or contra-indicators. Triage is not halted (complaints are not an escalation). The visit is booked on the repair path with no engineer gate.",
   "issue": {
     "id": "ISS-4413",
     "appliance_id": "app_001",

@@ -66,6 +66,8 @@ class IssueSession:
         # Slots the resident answered with new fault information (the reply led to a
         # re-invocation) - not rejections, so not counted towards the slot limit.
         self.slots_not_rejected: set[str] = set()
+        # How many of the persona's scripted_after_offer replies have been sent.
+        self.scripted_replies_used: int = 0
         self.tool_calls: list[dict] = []
         self.cost_usd: float = 0.0
         # The subagent is a separate session with its own bill; cost_usd is the main

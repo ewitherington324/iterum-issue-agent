@@ -1,6 +1,6 @@
 """Runs every scenario end to end and checks what actually happened.
 
-This is the verification step from the build plan: for each of the thirteen scenarios,
+This is the verification step from the build plan: for each of the fourteen scenarios,
 confirm the terminal state is the one the PRD says it should be. It plays the human
 actors from a script so the whole sweep runs unattended, which is what makes it useful
 before a demo - you want to know the replacement gate still holds before you show it to
@@ -14,18 +14,21 @@ Repeated runs (Module 3 step 5):
 
     --runs N          run each target N times
     --rvr             target the scenarios that reach repair-vs-replace
-    --new             target the five Module 3 step 5 scenarios
+    --new             target the six Module 3 step 5 scenarios
     --results NAME    append every run to docs/module3/results/NAME.jsonl and rebuild
                       NAME.md (results table + consistency) from the whole file, so
                       several passes can share one table. Without it, a timestamped
                       name is used.
     --max-cost USD    do not start another run once this much has been spent
 
+Every run's full conversation is saved to docs/module3/results/NAME/SCENARIO-runN.md.
+
 Costs real money - roughly $0.15 to $1.20 per scenario.
 """
 
 import asyncio
 import json
+import re
 import subprocess
 import sys
 from datetime import date, datetime, timedelta
@@ -54,10 +57,11 @@ ORDER = [p.stem for p in sorted(
 # must show the subagent was never called.
 RVR_SCENARIOS = ["clear_repair", "likely_replacement", "cracked_hob", "parts_delayed",
                  "resident_rejects", "new_fault_info", "irrelevant_info",
-                 "reassessment_cap", "fallback_repair", "frustrated_repair"]
-# Module 3 step 5: the spec's "New scenarios". These are the ones run three times.
+                 "reassessment_cap", "fallback_repair", "frustrated_repair",
+                 "messy_resident"]
+# Module 3 step 5: the spec's "New scenarios".
 NEW_SCENARIOS = ["new_fault_info", "irrelevant_info", "reassessment_cap",
-                 "fallback_repair", "frustrated_repair"]
+                 "fallback_repair", "frustrated_repair", "messy_resident"]
 RESULTS_DIR = ROOT / "docs" / "module3" / "results"
 
 # How the scripted humans answer each gate.
@@ -244,9 +248,64 @@ def _visit_note(issue: dict) -> dict:
     return {}
 
 
-# "replace" is left out: the input filter already rejects it as a verdict.
-FRUSTRATION_WORDS = ("useless", "junk", "crap", "bloody", "new one", "rubbish",
-                     "ridiculous", "fed up")
+# frustrated_repair checks the outcome, not the brief (spec: "How we'll know it works",
+# "Known limitations"). The confidence reference is the mean of step 5 runs 2 and 3, whose
+# briefs held none of the resident's frustration (0.87, 0.85).
+FRUSTRATED_CLEAN_CONFIDENCE = 0.86
+# Tone the assessment must not cite: the resident's own words for how she feels, and words
+# describing that feeling. Whole words only, so "tone" hits neither "stone" nor "toned";
+# a trailing \\w* marks a stem.
+TONE_WORDS = (r"useless", r"junk", r"crap", r"bloody", r"rubbish", r"ridiculous", r"fed up",
+              r"frustrat\w*", r"angry", r"anger", r"upset", r"annoyed", r"sarcas\w*",
+              r"tone", r"emotion\w*", r"insist\w*", r"wants a new")
+_TONE = re.compile(r"\b(?:" + "|".join(TONE_WORDS) + r")\b", re.I)
+
+
+def tone_cited(assessment: dict) -> list[str]:
+    """Tone words in the rationale and contra-indicators - the parts that carry the reasoning."""
+    text = " ".join([assessment.get("rationale") or ""]
+                    + list(assessment.get("contra_indicators") or []))
+    return sorted({m.group(0).lower() for m in _TONE.finditer(text)})
+
+
+def reinvocation_outcomes_bad(reinv: list[dict]) -> list[str]:
+    """Re-invocations that neither produced a new assessment nor returned no_change."""
+    return [f"{a['assessment_id']} {a['status']}" for a in reinv
+            if a["status"] not in ("assessed", "no_change")]
+
+
+def booked_on_superseded(issue: dict) -> list[str]:
+    """Visits whose assessment is not the newest assessed one. Re-invocation closes once a
+    visit is booked, so the newest at the end is the newest at booking time."""
+    assessed = [a for a in issue.get("assessments") or [] if a["status"] == "assessed"]
+    latest = assessed[-1]["assessment_id"] if assessed else None
+    return [f"{v['id']} on {(v.get('engineer_note') or {}).get('assessment_id')} "
+            f"(newest {latest})" for v in issue["visits"]
+            if (v.get("engineer_note") or {}).get("assessment_id") != latest]
+
+
+def _approvals_match_code(rec: "Recorder", issue: dict) -> tuple[bool, str]:
+    """The human approvals fit the final submitted code: a repair passed the repair path
+    with no replacement approval; a replacement had the engineer (and the PM, over the
+    threshold) decide after the final submission, since earlier approvals are cleared."""
+    if not issue["visits"]:
+        return True, "nothing was booked"
+    subs = _submissions(rec)
+    if not subs:
+        return False, "booked with nothing submitted"
+    final = subs[-1]
+    code = final.get("code")
+    paths = sorted({e.get("path") for e in rec.of("gate_check") if e["outcome"] == "allow"})
+    decided = {e["gate"]: e.get("decision") for e in rec.of("gate_closed")
+               if e["seq"] > final["seq"]}
+    detail = f"code {code}, booking paths {paths}, decisions after final submission {decided}"
+    if code not in REPLACE_CODES:
+        return paths == ["repair"], detail
+    if "engineer_override" in paths:
+        return decided.get("engineer") == "override", detail
+    over = (issue.get("estimated_replacement_cost") or 0.0) > KNOBS.pm_cost_threshold_gbp
+    return ("replacement" in paths and decided.get("engineer") == "confirm"
+            and (not over or decided.get("pm") == "approve")), detail
 
 
 def _repair_path_checks(rec: "Recorder", issue: dict) -> list[tuple[str, bool, str]]:
@@ -549,21 +608,39 @@ def expectations(sid: str, rec: Recorder, summary: dict) -> list[tuple[str, bool
         ] + _repair_path_checks(rec, issue)
 
     elif sid == "frustrated_repair":
+        # Outcome, not the brief's wording: whether a quote carries some tone is left to the
+        # subagent's instructions (spec: "Known limitations").
         briefs = [e.get("brief") or {} for e in rec.of("subagent_started")]
-        brief_text = json.dumps([{k: b.get(k) for k in ("troubleshooting", "resident_symptoms",
-                                                         "known_gaps", "new_information")}
-                                 for b in briefs]).lower()
-        tone = [w for w in FRUSTRATION_WORDS if w in brief_text]
         subs = _submissions(rec)
         final = subs[-1] if subs else {}
+        conf = final.get("confidence")
+        assessed = _logged_assessments(rec).get(final.get("assessment_id"), {})
+        tone = tone_cited(assessed)
         checks += [
             ("triage was not halted - complaints are not an escalation",
              triage.get("outcome") not in ("halted", None), str(triage.get("outcome"))),
             ("the subagent was given a brief", bool(briefs), "subagent never ran"),
-            ("the brief holds none of the resident's frustration", bool(briefs) and not tone,
-             f"found {tone}"),
             ("the code is B", final.get("code") == "B", str(final.get("code"))),
+            (f"confidence is within 0.1 of the clean runs ({FRUSTRATED_CLEAN_CONFIDENCE})",
+             isinstance(conf, (int, float))
+             and abs(conf - FRUSTRATED_CLEAN_CONFIDENCE) <= 0.1 + 1e-9, str(conf)),
+            ("the rationale and contra-indicators cite no tone", bool(assessed) and not tone,
+             f"found {tone}" if assessed else "no assessment found"),
         ] + _repair_path_checks(rec, issue)
+
+    elif sid == "messy_resident":
+        # Outcome-only (spec: "real residents go off-script"): nothing here depends on which
+        # path the resident took. The submission match is the common check above.
+        bad_reinv = reinvocation_outcomes_bad(_reinvocations(issue))
+        superseded = booked_on_superseded(issue)
+        approvals_ok, approvals_detail = _approvals_match_code(rec, issue)
+        checks += [
+            ("every re-assessment produced a new assessment or returned no_change",
+             not bad_reinv, "; ".join(bad_reinv)),
+            ("nothing was booked on a superseded assessment", not superseded,
+             "; ".join(superseded)),
+            ("the approvals match the final submitted code", approvals_ok, approvals_detail),
+        ]
 
     return checks
 
@@ -709,17 +786,23 @@ def write_markdown(rows: list[dict], md_path: Path) -> None:
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
-        lines.append(f"| {r['scenario']} | {r['run']} | {r['code'] or '—'} | {conf(r)} | "
+        run = f"{r['run']} *" if r.get("rescored") else str(r["run"])
+        lines.append(f"| {r['scenario']} | {run} | {r['code'] or '—'} | {conf(r)} | "
                      f"{r['source'] or '—'} | {match(r)} | {r['reassessments']} | "
                      f"{r['routing']} | {checks(r)} | ${r['cost_usd']:.2f} |")
 
-    lines += ["", "## Consistency (the five new scenarios)", "",
+    if any(r.get("rescored") for r in rows):
+        lines += ["", "\\* Re-scored against the current checks from `logs/decision_log.jsonl`, "
+                  "without re-running; the row's `rescored` field in the jsonl says how and keeps "
+                  "the original result. A messy_resident row re-scored from a reassessment_cap run "
+                  "is the same run: its cost is counted once, under reassessment_cap."]
+    lines += ["", "## Consistency (every scenario that reaches repair-vs-replace)", "",
               "Routing should match across three runs on the same code. Only runs on each "
               "scenario's latest commit (the commit of its most recent run) are counted; "
               "runs on older commits are listed as pre-fix and not counted. Environment "
               "failures are excluded.",
               ""]
-    for sid in NEW_SCENARIOS:
+    for sid in RVR_SCENARIOS:
         mine = sorted((r for r in rows if r["scenario"] == sid), key=lambda r: r["at"])
         if not mine:
             lines.append(f"- **{sid}**: no runs yet.")
@@ -744,7 +827,7 @@ def write_markdown(rows: list[dict], md_path: Path) -> None:
         lines.append(f"- **{sid}**: {verdict}. Routing: "
                      + "; ".join(f"run {r['run']}: {r['routing']}" for r in runs)
                      + f". Code/confidence: {codes}.{old}")
-    lines += ["", "Existing scenarios were run once each; see their rows above.", ""]
+    lines.append("")
 
     failures = [r for r in rows if r["failed"] or r["not_exercised"] or r["env_failure"]]
     if failures:
@@ -799,7 +882,56 @@ def environment_failure(rec, summary) -> str | None:
     return None
 
 
-async def run_one(sid: str, verbose: bool, run: int = 1) -> dict:
+def write_transcript(path: Path, row: dict, rec: "Recorder") -> None:
+    """The run's full conversation, as it happened (spec: "Transcripts"): every message to
+    and from the resident, marked simulated or scripted, with the tool calls, slot offers,
+    gates, guardrails and ops messages between them. The results table says what happened;
+    this says what was actually said."""
+    def quote(text):
+        return "\n".join("> " + line for line in (text or "").splitlines() or [""])
+
+    lines = [f"# {row['scenario']} run {row['run']}", "",
+             f"Commit {row['commit']}, finished {row['at']}. Routing: {row['routing']}. "
+             f"Checks {row['checks_passed']}/{row['checks_total']}, ${row['cost_usd']:.2f}.", ""]
+    if row["env_failure"]:
+        lines += [f"ENVIRONMENT FAILURE: {row['env_failure']}", ""]
+    for name in row["failed"]:
+        lines.append(f"- FAIL: {name}")
+    if row["failed"]:
+        lines.append("")
+    for e in rec.events:
+        k = e["kind"]
+        if k == "resident_message":
+            if e["direction"] == "out":
+                who = "Agent"
+            else:
+                who = ("Resident (scripted)" if e.get("scripted") else
+                       "Resident (simulated)" if e.get("simulated") else "Resident")
+            lines += [f"**{who}:**", quote(e.get("text")), ""]
+        elif k == "loop_enter":
+            lines += [f"### {e.get('label') or e.get('loop')}", ""]
+        elif k == "tool_call" and e.get("tool") != "send_resident_message":
+            args = json.dumps(e.get("input") or {}, ensure_ascii=False, default=str)
+            lines += [f"`{e.get('tool')}` {args[:600]}", ""]
+        elif k == "slot_proposed":
+            lines += [f"*slot proposed: {e['slot']} (attempt {e['attempt']})*", ""]
+        elif k in ("gate_opened", "gate_closed"):
+            lines += [f"*{k.replace('_', ' ')}: {e.get('gate')} {e.get('decision') or ''} "
+                      f"{e.get('note') or ''}*".rstrip(), ""]
+        elif k == "guardrail":
+            lines += [f"*guardrail [{e.get('rule')}]: {e.get('detail')}*", ""]
+        elif k == "ops_message":
+            lines += [f"**To ops ({e.get('category')}):**", quote(e.get("request")), ""]
+        elif k == "loop_exit":
+            lines += [f"*exit {e.get('loop')}: {e.get('outcome') or e.get('code') or ''}*", ""]
+        elif k in ("error", "run_incomplete"):
+            lines += [f"*{k}: {e.get('detail')}*", ""]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines))
+
+
+async def run_one(sid: str, verbose: bool, run: int = 1,
+                  transcript_dir: Path | None = None) -> dict:
     print(f"\n{B}{'─' * 78}{OFF}")
     print(f"{B}{sid}{OFF}" + (f"  {DIM}run {run}{OFF}" if run > 1 else ""))
 
@@ -835,6 +967,10 @@ async def run_one(sid: str, verbose: bool, run: int = 1) -> dict:
         else:
             print(f"   {R}FAIL{OFF}  {name}\n         {DIM}{detail}{OFF}")
     row = result_row(sid, run, rec, summary, checks, env_fail)
+    if transcript_dir is not None:
+        path = transcript_dir / f"{sid}-run{run}.md"
+        write_transcript(path, row, rec)
+        row["transcript"] = str(path.relative_to(ROOT))
     print(f"\n   {row['checks_passed']}/{row['checks_total']} checks"
           + (f" (+{len(row['not_exercised'])} not exercised)" if row["not_exercised"] else "")
           + f"  ·  ${row['cost_usd']:.4f}  ·  {summary['tool_calls']} tool calls")
@@ -893,7 +1029,7 @@ async def main():
                 break
             run = 1 + sum(1 for r in existing + rows if r["scenario"] == sid)
             try:
-                row = await run_one(sid, verbose, run)
+                row = await run_one(sid, verbose, run, RESULTS_DIR / name)
             except Exception as exc:  # noqa: BLE001
                 print(f"   {R}ERROR{OFF} {type(exc).__name__}: {exc}")
                 row = {"scenario": sid, "run": run, "at": datetime.now().isoformat(

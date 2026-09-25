@@ -2,7 +2,7 @@
   "id": "reassessment_cap",
   "order": 11,
   "title": "Re-assessment cap reached",
-  "summary": "Oven not heating. After the first appointment offer the resident reports one new symptom per message, three times. Two re-assessments are allowed; the third goes to ops with the history.",
+  "summary": "The fire drill for the re-assessment cap. Oven not heating. The model plays the resident until the first appointment offer; after that the resident's replies are scripted - one new symptom per message, three times, never a date. Two re-assessments are allowed; the third goes to ops with the history.",
   "expected": "Two reassess_repair_vs_replace calls reach the subagent. The third is stopped by the cap in code: the subagent is not run, ops receives an escalation with the assessment history attached, the thread is marked escalated, and nothing is booked. Any later booking or slot tool is blocked by the PreToolUse hook.",
   "issue": {
     "id": "ISS-4411",
@@ -30,6 +30,11 @@
   "resident_persona": {
     "name": "George Mbeki",
     "ground_truth": "UNTIL an appointment date is offered: the oven does not heat at all. The light comes on and the fan at the back spins, but it stays cold even after half an hour on 200. The grill, the clock and the knobs all work normally. THEN, after the first appointment date is offered, he notices three more things, one at a time, in this order: (1) the grill has now stopped working too - it stays cold; (2) the clock display on the front keeps flickering and going blank; (3) the temperature knob now spins round freely without the usual clicks. None of these were happening before the first appointment offer.",
-    "behaviour": "Friendly and chatty, works shifts. Answers triage questions accurately. IMPORTANT TIMING RULE: from the first time the support service offers a specific appointment date or day, NEVER accept or decline any date. Instead, each reply from then on reports exactly ONE of the new things above, in order - one per message, never two in the same message - saying you have just noticed it, and asking whether that changes anything. After you have reported all three, if asked about dates again, say you would rather someone looked at the whole thing before you commit to a day. Never mention any of the three before the first appointment offer."
+    "behaviour": "Friendly and chatty, works shifts. Answers triage questions accurately. IMPORTANT TIMING RULE: from the first time the support service offers a specific appointment date or day, NEVER accept or decline any date. Instead, each reply from then on reports exactly ONE of the new things above, in order - one per message, never two in the same message - saying you have just noticed it, and asking whether that changes anything. After you have reported all three, if asked about dates again, say you would rather someone looked at the whole thing before you commit to a day. Never mention any of the three before the first appointment offer.",
+    "scripted_after_offer": [
+      "oh wait, before we sort a day - i've just noticed the grill's stopped working now too, it stays cold. does that change anything?",
+      "sorry, one more thing - the clock on the front keeps flickering and going blank. does that change anything?",
+      "and now the temperature knob just spins round freely, none of the usual clicks. does that change anything?"
+    ]
   }
 }

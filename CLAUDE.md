@@ -13,8 +13,8 @@ Module 3 work follows docs/module3/SUBAGENT_SPEC.md. If the code and the spec di
 
 ```bash
 ./run.sh                              # http://localhost:8000
-.venv/bin/python selftest.py          # 202 checks, no API key, ~1s — use this constantly
-.venv/bin/python verify.py            # all 13 scenarios against the real model (~$8)
+.venv/bin/python selftest.py          # 215 checks, no API key, ~1s — use this constantly
+.venv/bin/python verify.py            # all 14 scenarios against the real model (~$8)
 .venv/bin/python verify.py --new --runs 2 --results NAME   # repeat runs; table in docs/module3/results/
 .venv/bin/python verify.py self_fix   # one scenario, verbose trace (~$0.15–0.70)
 ```
@@ -98,7 +98,7 @@ server.py           FastAPI: SSE stream + the human-actor endpoints
 docs/               PRD, project map, and docs/module2/ (submitted write-up, evidence,
                     pre-skills baseline prompts)
 static/             the three-pane UI (vanilla JS, roadmap-green palette)
-scenarios/*.json    the 13 test cases; "order" drives both the UI dropdown and verify.py
+scenarios/*.json    the 14 test cases; "order" drives both the UI dropdown and verify.py
 ```
 
 **Generated — don't hand-edit:** `data/store.json` (rebuilt per scenario run),

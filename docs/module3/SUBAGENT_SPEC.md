@@ -286,10 +286,44 @@ recorded as open issue #5 in `PROJECT_MAP.md`.
   called.
 - **New scenarios:** new fault information arrives mid-conversation (re-assesses); irrelevant
   information arrives (no change); the cap is reached (goes to ops); the fallback path; a resident
-  with heavy frustration but symptoms pointing to repair.
+  with heavy frustration but symptoms pointing to repair; a resident who goes off-script.
+- **Principle: real residents go off-script.** Checks test that the system reaches a correct,
+  safe outcome on whatever path the conversation takes, not that the simulated resident followed
+  its script. Where a check needs one exact path, the scenario pins that path in code rather than
+  trusting the model playing the resident. Step 5 showed why: in `reassessment_cap` runs 3–5 the
+  simulated resident reported a symptom during triage that its script held back, then accepted
+  the first date, so the cap was never reached and the runs said nothing about the agent.
+  - **`reassessment_cap` (the fire drill)** tests the cap itself. The model plays the resident
+    until the first date is offered; after that the resident's replies are three scripted
+    messages (`scripted_after_offer`), one new symptom each, never a date. Its checks are
+    path-specific: two re-invocations reach the subagent, the third is stopped by the cap, ops
+    gets the history, nothing is booked.
+  - **`messy_resident`** has the same persona, played freely by the model. Its checks are
+    outcome-only: every submission matches its assessment; every re-invocation that reached the
+    subagent either produced a new assessment or returned `no_change`; nothing was booked on a
+    superseded assessment; the approvals match the final submitted code. Nothing checks which
+    path the resident took.
+  - **`frustrated_repair`** checks the outcome, not the wording of the brief: the code is B,
+    the confidence is within 0.1 of the clean runs (0.86, the mean of step 5 runs 2 and 3, whose
+    briefs held no frustration), and the rationale and contra-indicators cite no tone. Whether a
+    quote in the brief carries some of the resident's tone is not checked; see Known limitations.
+- **Transcripts:** every `verify.py` run saves its full conversation (every message to and from
+  the resident, marked simulated or scripted, with the tool calls between them) under
+  `docs/module3/results/NAME/`, so a result can be diagnosed from what was actually said rather
+  than from the agent's summary of it.
 - **Consistency:** the same scenario can produce different results on different runs, because the
   model isn't fully predictable. So every scenario that reaches repair-vs-replace, existing and
-  new, is run three times via `verify.py`. The routing should match across all three.
+  new, is run three times via `verify.py` on the same commit. The routing should match across
+  all three. Runs on an older commit are shown as pre-fix and not counted.
+
+## Known limitations
+
+- **Tone filtering relies on the subagent's instructions, not code.** The input filter checks
+  that quotes are verbatim and carry no verdict, but it cannot tell a complaint from a symptom in
+  the resident's own words, so a quote such as "now it's completely useless" can reach the brief
+  (step 5, `frustrated_repair` runs 4 and 5). What stops it moving the judgement is the
+  subagent's instruction that tone is not evidence, and `verify.py` checks the outcome (code,
+  confidence, no tone cited) rather than the brief. A classifier on the brief is a future option.
 
 ## Out of scope
 

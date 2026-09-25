@@ -58,8 +58,8 @@ own instructions (`agent/prompts.py`) so they apply from the first message.
 | `agent/trace.py` | Guardrails (e.g. the warranty block) and the decision log |
 | `agent/prompts.py` | Main agent instructions, including the escalation rules |
 | `skills/` | The three Module 2 skills + ten appliance fault references |
-| `scenarios/` | The 13 test cases (8 from Module 2, 5 added in Module 3 step 5) |
-| `selftest.py` | 202 quick checks, free, no API key |
+| `scenarios/` | The 14 test cases (8 from Module 2, 6 added in Module 3 step 5) |
+| `selftest.py` | 215 quick checks, free, no API key |
 | `verify.py` | Runs scenarios against the real model — costs money |
 | `static/`, `server.py` | The browser demo |
 | `docs/` | PRD, this map, and `module2/` (submitted write-up, evidence, old prompts) |

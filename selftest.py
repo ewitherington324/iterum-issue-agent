@@ -83,7 +83,7 @@ async def main():
     # ---------------------------------------------------------------- scenarios load
     section("Scenarios")
     ids = sorted(p.stem for p in Path("scenarios").glob("*.json"))
-    check("all thirteen scenarios present (8 + 5 from Module 3 step 5)", len(ids) == 13, str(ids))
+    check("all fourteen scenarios present (8 + 6 from Module 3 step 5)", len(ids) == 14, str(ids))
     orders = [json.loads(Path(f"scenarios/{i}.json").read_text())["order"] for i in ids]
     check("scenario orders are unique", len(set(orders)) == len(orders), str(sorted(orders)))
     for sid in ids:
@@ -95,7 +95,7 @@ async def main():
         except Exception as exc:  # noqa: BLE001
             check(f"{sid} loads", False, str(exc))
     for sid in ("new_fault_info", "irrelevant_info", "reassessment_cap", "fallback_repair",
-                "frustrated_repair"):
+                "frustrated_repair", "messy_resident"):
         STORE.load_scenario(sid)
         issue = STORE.active_issue()
         app = STORE.appliance(issue["appliance_id"])
@@ -971,6 +971,77 @@ async def main():
             "contra_indicators": ["c"], "determinative": False, "confidence_basis": "test"})
         check(f"a subagent repair at {conf:.2f} {'meets' if meets else 'does not meet'} it",
               a["meets_threshold"] is meets and assessments.meets_threshold(a) is meets)
+
+    # ---------------------------------------------------------------- off-script residents
+    section("Real residents go off-script: pinned paths and outcome checks (Module 3 step 5)")
+    from agent import resident_sim
+    cap_scn = json.loads(Path("scenarios/reassessment_cap.json").read_text())
+    messy_scn = json.loads(Path("scenarios/messy_resident.json").read_text())
+    script = cap_scn["resident_persona"]["scripted_after_offer"]
+    s = session.IssueSession(cap_scn)
+    before = resident_sim.scripted_reply(s)
+    s.proposed_slots.append("2026-09-29")
+    got = [resident_sim.scripted_reply(s) for _ in range(len(script) + 1)]
+    check("fire drill: the model plays the resident until a date is offered",
+          before is None and s.scripted_replies_used == len(script), str(before))
+    check("  ...then three scripted replies in order, then the model again",
+          len(script) == 3 and got == script + [None], str(got))
+    check("  ...each reports something new and none mentions a date or a day",
+          all("change anything" in r for r in script)
+          and not any(w in r.lower() for r in script for w in
+                      ("monday", "tuesday", "wednesday", "thursday", "friday", "date", "fine")),
+          str(script))
+    m = session.IssueSession(messy_scn)
+    m.proposed_slots.append("2026-09-29")
+    check("messy_resident: same persona, played freely by the model after the offer too",
+          resident_sim.scripted_reply(m) is None
+          and messy_scn["resident_persona"]["ground_truth"] == cap_scn["resident_persona"]["ground_truth"]
+          and messy_scn["issue"]["id"] != cap_scn["issue"]["id"])
+
+    import verify
+    check("frustrated_repair: tone in the rationale or contra-indicators is caught",
+          verify.tone_cited({"rationale": "The resident is clearly frustrated and calls it junk.",
+                             "contra_indicators": ["She insists on a new machine"]})
+          == ["frustrated", "insists", "junk"])
+    check("  ...and fault words are not mistaken for it ('stone cold', 'toned glass')",
+          verify.tone_cited({"rationale": "Oven stone cold after 30 minutes; toned glass intact.",
+                             "contra_indicators": ["Door slams open under its own weight"]}) == [])
+    check("messy_resident: a failed re-invocation is flagged, assessed and no_change are not",
+          verify.reinvocation_outcomes_bad([
+              {"assessment_id": "X-RVR-2", "status": "assessed"},
+              {"assessment_id": "X-RVR-3", "status": "no_change"},
+              {"assessment_id": "X-RVR-4", "status": "reassessment_failed"}])
+          == ["X-RVR-4 reassessment_failed"])
+    fake_issue = {"assessments": [{"assessment_id": "X-RVR-1", "status": "assessed"},
+                                  {"assessment_id": "X-RVR-2", "status": "assessed"},
+                                  {"assessment_id": "X-RVR-3", "status": "no_change"}],
+                  "visits": [{"id": "VIS-1", "engineer_note": {"assessment_id": "X-RVR-1"}}],
+                  "estimated_replacement_cost": 329.0}
+    check("  ...a visit booked on a superseded assessment is flagged",
+          len(verify.booked_on_superseded(fake_issue)) == 1)
+    fake_issue["visits"][0]["engineer_note"]["assessment_id"] = "X-RVR-2"
+    check("  ...and one on the newest assessed (past a later no_change) is not",
+          verify.booked_on_superseded(fake_issue) == [])
+
+    class FakeRec:
+        def __init__(self, events):
+            self.events = events
+
+        def of(self, kind):
+            return [e for e in self.events if e["kind"] == kind]
+
+    sub = {"kind": "loop_exit", "loop": "decision", "seq": 10, "code": "A"}
+    early = {"kind": "gate_closed", "gate": "engineer", "decision": "confirm", "seq": 5}
+    late = dict(early, seq=12)
+    allow = {"kind": "gate_check", "outcome": "allow", "path": "replacement", "seq": 13}
+    ok, _ = verify._approvals_match_code(FakeRec([sub, late, allow]), fake_issue)
+    stale, _ = verify._approvals_match_code(FakeRec([early, sub, allow]), fake_issue)
+    repair_ok, _ = verify._approvals_match_code(
+        FakeRec([dict(sub, code="B"), dict(allow, path="repair")]), fake_issue)
+    check("  ...approvals match the code: a replacement confirmed after the final submission passes",
+          ok and repair_ok)
+    check("  ...a confirmation given on an earlier assessment does not",
+          not stale)
 
     # ---------------------------------------------------------------- summary
     total, passed = len(results), sum(results)
