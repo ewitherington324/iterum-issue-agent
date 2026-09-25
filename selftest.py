@@ -56,8 +56,8 @@ async def main():
     check("setting_sources=[] so no user/project settings leak in", opts.setting_sources == [])
     check("permission_mode is 'default' so gated calls reach can_use_tool",
           opts.permission_mode == "default")
-    check("18 tools registered (15 PRD tools + 3 loop exits)", len(ALL_TOOLS) == 18,
-          f"got {len(ALL_TOOLS)}")
+    check("17 tools registered (14 PRD tools + 3 loop exits; search_similar_issues is the "
+          "subagent's)", len(ALL_TOOLS) == 17, f"got {len(ALL_TOOLS)}")
     check("book_visit is NOT auto-approved (it must reach the gate)",
           qualified("book_visit") not in AUTONOMOUS_TOOLS)
     check("send_resident_message IS auto-approved (repair path is autonomous)",
@@ -249,16 +249,20 @@ async def main():
     s = session.set_current(session.IssueSession(json.loads(Path("scenarios/clear_repair.json").read_text())))
     s.enter_loop(session.DECISION)
     issue = STORE.active_issue()
+    STORE.append_conversation("resident", "It hums when it should pump out, then nothing.")
+    fault_args = {"issue_id": issue["id"], "appliance_id": issue["appliance_id"],
+                  "confirmed_fault": "Water stays in the drum after the cycle.",
+                  "troubleshooting": [{"step": "Cleaned filter", "result": "No change"}],
+                  "resident_symptoms": ["It hums when it should pump out"],
+                  "known_gaps": []}
     KNOBS.use_llm_for_decision_analysis = False  # no API key here: the fallback path
-    out = await assess_repair_vs_replace.handler({"appliance_id": issue["appliance_id"],
-                                                  "issue_description": "d", "triage_findings": "f"})
+    out = await assess_repair_vs_replace.handler(fault_args)
     first = json.loads(out["content"][0]["text"])
     check("assess_repair_vs_replace returns an assessment_id",
           first.get("assessment_id") == f"{issue['id']}-RVR-1", str(first.get("assessment_id")))
     check("  ...and adds it to the issue's assessment log",
           assessments.latest(issue)["assessment_id"] == first["assessment_id"])
-    out = await assess_repair_vs_replace.handler({"appliance_id": issue["appliance_id"],
-                                                  "issue_description": "d", "triage_findings": "f"})
+    out = await assess_repair_vs_replace.handler(fault_args)
     second = json.loads(out["content"][0]["text"])
     KNOBS.use_llm_for_decision_analysis = True
 
@@ -282,6 +286,202 @@ async def main():
           f"assessed={second['code']}/{second['confidence']}")
     check("  ...and the rationale is the assessment's, not restated",
           exit_.get("rationale") == second["rationale"])
+
+
+    # ---------------------------------------------------------------- Module 3 step 2: input filter
+    section("Subagent input is filtered: symptoms verbatim, no grievances or scheduling (Module 3)")
+    from agent import subagent
+    schema = assess_repair_vs_replace.input_schema
+    check("assess_repair_vs_replace takes only the spec's fault fields",
+          sorted(schema["properties"]) == sorted(subagent.INPUT_FIELDS)
+          and schema.get("additionalProperties") is False, str(sorted(schema["properties"])))
+    check("  ...with no free-text findings, warranty or cost field for the main agent to fill",
+          not {"triage_findings", "findings", "issue_description", "warranty",
+               "in_warranty", "repair_cost", "code", "confidence"} & set(schema["properties"]))
+
+    STORE.load_scenario("clear_repair")
+    s = session.set_current(session.IssueSession(json.loads(Path("scenarios/clear_repair.json").read_text())))
+    s.enter_loop(session.DECISION)
+    issue = STORE.active_issue()
+    said = [
+        "There’s a low humming noise when it should pump out, then nothing happens.",
+        "Honestly the last engineer was useless and I'm fed up with this.",
+        "I can only do Tuesdays after 3pm because of work.",
+        "I replaced the filter and it still leaks",
+        "It's knackered, it needs replacing.",
+    ]
+    for line in said:
+        STORE.append_conversation("resident", line)
+    log = STORE.data["conversation_log"]
+    good = {"issue_id": issue["id"], "appliance_id": issue["appliance_id"],
+            "confirmed_fault": "The machine does not pump out at the end of the cycle; "
+                               "water stays in the drum.",
+            "troubleshooting": [{"step": "Cleaned the filter", "result": "Filter was clean, "
+                                 "no change"}],
+            "resident_symptoms": ["There's a low humming noise when it should pump out, then "
+                                  "nothing happens."],
+            "known_gaps": ["No photo"]}
+    probs = subagent.check_input(issue, good, log)
+    check("a clean, verbatim input is accepted (curly vs straight apostrophe ignored)",
+          not probs, str(probs))
+    probs = subagent.check_input(issue, dict(good, resident_symptoms=[
+        "The pump makes a humming sound and does not drain"]), log)
+    check("a paraphrased quote is rejected", any("word for word" in p for p in probs), str(probs))
+    probs = subagent.check_input(issue, dict(good, resident_symptoms=[
+        "low humming noise when it should pump out"]), log)
+    check("a shortened verbatim quote is accepted", not probs, str(probs))
+    probs = subagent.check_input(issue, dict(good, resident_symptoms=[
+        "I replaced the filter and it still leaks"]), log)
+    check('"I replaced the filter and it still leaks" passes (evidence, not a verdict)',
+          not probs, str(probs))
+    for phrase in ["it needs replacing", "just replace it", "it's beyond repair",
+                   "not worth fixing", "a write-off", "get a new one"]:
+        check(f"verdict phrase caught: {phrase!r}", subagent.verdicts_in(phrase), phrase)
+    probs = subagent.check_input(issue, dict(good, confirmed_fault=
+        "Drain pump failure; at this age it is not worth repairing."), log)
+    check("the main agent's lean in confirmed_fault is rejected",
+          any("verdict" in p for p in probs), str(probs))
+    probs = subagent.check_input(issue, dict(good, resident_symptoms=["it needs replacing"]), log)
+    check("a resident's verdict is rejected even though it is verbatim",
+          any("verdict" in p for p in probs), str(probs))
+    probs = subagent.check_input(issue, dict(good, appliance_id="app_001"), log)
+    check("another appliance's id is rejected", any("appliance_id" in p for p in probs), str(probs))
+    probs = subagent.check_input(issue, dict(good, in_warranty=False), log)
+    check("an extra field (e.g. warranty from the main agent) is rejected",
+          any("Unexpected" in p for p in probs), str(probs))
+
+    appliance = STORE.appliance(issue["appliance_id"])
+    brief = subagent.build_brief(issue, appliance, good)
+    prompt = subagent.render_brief(brief)
+    check("the subagent's input carries the verbatim symptom",
+          "low humming noise when it should pump out" in prompt)
+    leaked = [w for w in ("useless", "fed up", "Tuesdays", "3pm", "knackered")
+              if w.lower() in prompt.lower()]
+    check("grievances and scheduling in the conversation never reach the subagent",
+          not leaked, str(leaked))
+    check("warranty and costs come from the store, not the main agent",
+          brief["in_warranty"] is STORE.warranty(appliance)["in_warranty"]
+          and brief["estimated_repair_cost"] == issue["estimated_repair_cost"]
+          and brief["estimated_replacement_cost"] == issue["estimated_replacement_cost"]
+          and "GBP 165" in prompt and "GBP 549" in prompt)
+    system = subagent.system_prompt(appliance["appliance_type"], brief["fault_slug"])
+    from agent.skills import DECISION_SKILL as _DS, load_skill as _ls
+    check("the subagent's instructions are the skill plus the matching fault reference",
+          _ls(_DS) in system and "Fault pattern reference" in system
+          and "washer_dryer_not_draining" in system)
+    check("  ...and say that a resident's tone is not evidence",
+          "tone is not evidence" in system)
+
+    # A stand-in for the model, so the success path and the fallback path run with no key.
+    real_run = subagent.run
+    calls = []
+    from agent.reasoning import RepairVsReplace as _RVR, assessment_from_model as _afm
+
+    async def fake_run(b):
+        calls.append(b)
+        return _afm(_RVR(code="B", confidence=0.82, rationale="Pump fault, repairable.",
+                         key_factors=["k"], contra_indicators=["c"]), inputs={})
+
+    subagent.run = fake_run
+    KNOBS.use_llm_for_decision_analysis = True
+    out = await assess_repair_vs_replace.handler(good)
+    a = json.loads(out["content"][0]["text"])
+    check("the handler runs the subagent on the filtered brief",
+          len(calls) == 1 and calls[0] == brief, str(calls[:1]))
+    check("  ...and logs its answer with source 'subagent' and the brief attached",
+          a.get("source") == "subagent" and a.get("brief") == brief and a.get("code") == "B")
+
+    async def broken_run(b):
+        raise subagent.SubagentError("no submission")
+
+    subagent.run = broken_run
+    out = await assess_repair_vs_replace.handler(good)
+    a = json.loads(out["content"][0]["text"])
+    check("if the subagent fails, the fallback answers instead", a.get("source") == "fallback",
+          str(a.get("source")))
+    subagent.run = fake_run
+    calls.clear()
+    out = await assess_repair_vs_replace.handler(dict(good, resident_symptoms=["made up words here"]))
+    check("rejected input returns an error and never reaches the subagent",
+          out.get("is_error") and not calls)
+
+    # ---------------------------------------------------------------- Module 3 step 2: guard
+    section("Precondition guard: refuses in warranty or with no fault reference (Module 3)")
+    STORE.load_scenario("in_warranty")
+    s = session.set_current(session.IssueSession(json.loads(Path("scenarios/in_warranty.json").read_text())))
+    s.enter_loop(session.DECISION)
+    issue = STORE.active_issue()
+    STORE.append_conversation("resident", "The fridge is warm and the light is off.")
+    wargs = {"issue_id": issue["id"], "appliance_id": issue["appliance_id"],
+             "confirmed_fault": "The fridge is not cooling.", "troubleshooting": [],
+             "resident_symptoms": ["The fridge is warm"], "known_gaps": []}
+    check("s.warranty_blocked is not set - the guard must not depend on check_warranty",
+          not s.warranty_blocked)
+    out = await assess_repair_vs_replace.handler(wargs)
+    a = json.loads(out["content"][0]["text"])
+    check("in warranty: the assessment is refused", a.get("status") == "refused", str(a.get("status")))
+    check("  ...and says why", "warranty" in (a.get("refusal_reason") or "").lower())
+    check("  ...without running the subagent", not calls)
+    check("  ...and carries no code or confidence", a.get("code") is None
+          and a.get("confidence") is None and a.get("meets_threshold") is False)
+    r = await submit_recommendation.handler({"assessment_id": a["assessment_id"]})
+    check("  ...so there is nothing to submit", r.get("is_error"))
+
+    STORE.load_scenario("clear_repair")
+    s = session.set_current(session.IssueSession(json.loads(Path("scenarios/clear_repair.json").read_text())))
+    issue = STORE.active_issue()
+    STORE.appliance(issue["appliance_id"])["appliance_type"] = "Toaster"
+    for line in said:
+        STORE.append_conversation("resident", line)
+    out = await assess_repair_vs_replace.handler(good)
+    a = json.loads(out["content"][0]["text"])
+    check("no fault reference file for the type: refused, and routed to ops",
+          a.get("status") == "refused" and "reference" in a.get("refusal_reason", "")
+          and "ops" in a.get("next", ""), str(a.get("refusal_reason")))
+    check("  ...without running the subagent", not calls)
+    subagent.run = real_run
+
+    # ---------------------------------------------------------------- Module 3 step 2: surface
+    section("The subagent's tool surface (Module 3)")
+    sopts = subagent.build_options("x")
+    check("subagent: tools=[] and setting_sources=[] (invariant 1)",
+          sopts.tools == [] and sopts.setting_sources == [])
+    check("subagent: its own MCP server only", list(sopts.mcp_servers) == ["rvr"])
+    check("subagent: get_appliance, search_similar_issues and submit_assessment only",
+          sorted(sopts.allowed_tools) == sorted(f"mcp__rvr__{n}" for n in
+          ("get_appliance", "search_similar_issues", "submit_assessment")), str(sopts.allowed_tools))
+    ro = {t.name: t.annotations for t in subagent.TOOLS}
+    check("  ...and both lookups are read-only",
+          all(ro[n] and ro[n].read_only_hint for n in ("get_appliance", "search_similar_issues")))
+
+    async def sub_hook(tool):
+        return await subagent.pre_tool_use({"tool_name": tool, "tool_input": {}}, "tu", {})
+    for tool in ("Bash", "mcp__iterum__send_resident_message", "mcp__iterum__book_visit",
+                 "mcp__iterum__check_warranty"):
+        d, reason = denied(await sub_hook(tool))
+        check(f"subagent hook denies {tool}", d, reason)
+    d, _ = denied(await sub_hook("mcp__rvr__get_appliance"))
+    check("subagent hook allows its own lookup", not d)
+
+    STORE.load_scenario("clear_repair")
+    s = session.set_current(session.IssueSession(json.loads(Path("scenarios/clear_repair.json").read_text())))
+    r = await subagent.get_appliance.handler({"appliance_id": "app_001"})
+    check("subagent get_appliance is scoped to this issue's appliance", r.get("is_error"))
+    r = await subagent.get_appliance.handler({"appliance_id": STORE.active_issue()["appliance_id"]})
+    check("  ...and returns it", not r.get("is_error"))
+    subagent._submission = None
+    r = await subagent.submit_assessment.handler(
+        {"code": "B", "confidence": 0.8, "rationale": "r", "key_factors": ["k"]})
+    check("submit_assessment refuses a weighed call with no contra-indicators",
+          r.get("is_error") and subagent._submission is None)
+    r = await subagent.submit_assessment.handler(
+        {"code": "B", "confidence": 0.8, "rationale": "r", "key_factors": ["k"],
+         "contra_indicators": ["c"]})
+    check("  ...and accepts a valid one", not r.get("is_error") and subagent._submission is not None)
+    subagent._submission = None
+    check("main agent no longer has search_similar_issues",
+          qualified("search_similar_issues") not in AUTONOMOUS_TOOLS
+          and "search_similar_issues" not in {t.name for t in ALL_TOOLS})
 
     # ---------------------------------------------------------------- Module 3: skill isolation
     section("The repair-vs-replace skill never reaches the main agent (Module 3)")

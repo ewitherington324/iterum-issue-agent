@@ -91,11 +91,16 @@ def record(issue: dict, appliance_id: str, result: dict,
     }
     assessment["limits_applied"] = list(assessment["limits_applied"] or [])
 
-    cap = enforce_reported_limits(assessment)
-
-    assessment["code_meaning"] = RECOMMENDATION_CODES.get(assessment["code"], "unknown")
     assessment["confidence_threshold"] = KNOBS.confidence_threshold
-    assessment["meets_threshold"] = assessment["confidence"] >= KNOBS.confidence_threshold
+    if status == "assessed":
+        cap = enforce_reported_limits(assessment)
+        assessment["code_meaning"] = RECOMMENDATION_CODES.get(assessment["code"], "unknown")
+        assessment["meets_threshold"] = assessment["confidence"] >= KNOBS.confidence_threshold
+    else:
+        # A refusal or a no-change carries no recommendation of its own.
+        cap = None
+        assessment["code_meaning"] = None
+        assessment["meets_threshold"] = False
 
     log.append(assessment)
     trace.log_decision("assessment_recorded", assessment=assessment)

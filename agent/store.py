@@ -88,6 +88,16 @@ class Store:
                 if h["appliance_type"] == appliance_type]
 
     # --- derived -------------------------------------------------------------------
+    def appliance_view(self, appliance: dict) -> dict:
+        """What get_appliance returns - shared by the main agent's tool and the subagent's."""
+        prop = self.property(appliance["property_id"])
+        return {
+            **{k: v for k, v in appliance.items() if k != "warranty_months"},
+            "age_years": self.appliance_age_years(appliance),
+            "property_name": prop["name"] if prop else None,
+            "operator": prop["operator"] if prop else None,
+        }
+
     def appliance_age_years(self, appliance: dict) -> float:
         installed = date.fromisoformat(appliance["installation_date"])
         return round((self.today - installed).days / 365.25, 2)

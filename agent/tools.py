@@ -15,11 +15,11 @@ from datetime import date, timedelta
 
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
-from . import assessments, session
+from . import assessments, session, subagent, trace
 from .config import KNOBS
 from .events import BUS
 from .fallbacks import assess_heuristic, lookup_triage_steps
-from .reasoning import llm_assess_repair_vs_replace, llm_triage_steps
+from .reasoning import llm_triage_steps
 from .store import STORE
 
 RESIDENT_REPLY_TIMEOUT_S = 180
@@ -99,13 +99,7 @@ async def get_appliance(args):
     appliance = STORE.appliance(args["appliance_id"])
     if not appliance:
         return err(f"No appliance found with id {args['appliance_id']!r}.")
-    prop = STORE.property(appliance["property_id"])
-    return ok({
-        **{k: v for k, v in appliance.items() if k != "warranty_months"},
-        "age_years": STORE.appliance_age_years(appliance),
-        "property_name": prop["name"] if prop else None,
-        "operator": prop["operator"] if prop else None,
-    })
+    return ok(STORE.appliance_view(appliance))
 
 
 @tool("check_warranty",
@@ -126,16 +120,8 @@ async def check_warranty(args):
     return ok(result)
 
 
-@tool("search_similar_issues",
-      "Find comparable past jobs for this appliance type and fault, with what they actually "
-      "cost and how they were resolved. Use this to ground a repair-vs-replace call in real "
-      "outcomes rather than guesswork.",
-      {"appliance_type": str, "issue_description": str}, annotations=READ_ONLY)
-async def search_similar_issues(args):
-    matches = STORE.similar_issues(args["appliance_type"])
-    if not matches:
-        return ok(f"No comparable historical jobs held for {args['appliance_type']}.")
-    return ok({"appliance_type": args["appliance_type"], "comparable_jobs": matches})
+# search_similar_issues belongs to the repair-vs-replace subagent (agent/subagent.py).
+# The main agent never forms a repair-vs-replace view, so it has no use for comparables.
 
 
 @tool("get_property_data",
@@ -201,21 +187,45 @@ async def get_triage_steps(args):
 
 
 @tool("assess_repair_vs_replace",
-      "Get the repair-vs-replace assessment for this issue. It is made separately from you "
-      "and logged with an assessment_id; its code, confidence and rationale are final. "
-      "Submit it with submit_recommendation using that assessment_id. This is provisional "
-      "routing, not a diagnosis.",
-      {"appliance_id": str, "issue_description": str, "triage_findings": str})
+      "Hand the fault evidence to the repair-vs-replace subagent, which assesses it "
+      "separately from you. Pass only evidence about the appliance and the fault: a "
+      "one-or-two-sentence confirmed fault, each troubleshooting step with its result, the "
+      "resident's own words about the appliance copied exactly (shorten a quote to the part "
+      "about the fault if needed), and any known gaps. Leave out complaints, scheduling and "
+      "your own view of the outcome. Warranty and costs are added from Iterum records. The "
+      "result is logged with an assessment_id; submit it with submit_recommendation. This "
+      "is provisional routing, not a diagnosis.",
+      subagent.INPUT_SCHEMA)
 async def assess_repair_vs_replace(args):
-    appliance = STORE.appliance(args["appliance_id"])
-    if not appliance:
-        return err(f"No appliance found with id {args['appliance_id']!r}.")
-
     issue = STORE.active_issue()
+
+    # The input filter (spec: "Inputs"). Refused input goes back to the main agent with
+    # every reason at once, so it can correct and call again.
+    problems = subagent.check_input(issue, args, STORE.data["conversation_log"])
+    if problems:
+        trace.log_decision("assessment_input_rejected", problems=problems, tool_input=args)
+        return err("The assessment input was not accepted:\n- " + "\n- ".join(problems))
+
+    appliance = STORE.appliance(issue["appliance_id"])
+
+    # The precondition guard (spec: "Responsibilities"). Deliberately here rather than in
+    # the PreToolUse hook - see CLAUDE.md invariant 3.
+    reason = subagent.refusal_reason(issue, appliance)
+    if reason:
+        assessment = assessments.record(issue, appliance["id"], subagent.refused(reason),
+                                        status="refused")
+        STORE.save()
+        BUS.publish("guardrail", rule="assessment_refused", tool="assess_repair_vs_replace",
+                    detail=f"{assessment['assessment_id']}: {reason}")
+        return ok({**assessment, "next": (
+            "No recommendation was made, so there is nothing to submit. Hand the thread to "
+            "ops with send_ops_message (category 'escalation', or 'warranty_handoff' if in "
+            "warranty), tell the resident ops will be in touch, and close the job as "
+            "'handed_to_ops'.")})
+
+    brief = subagent.build_brief(issue, appliance, args)
     age = STORE.appliance_age_years(appliance)
-    warranty = STORE.warranty(appliance)
-    repair = issue["estimated_repair_cost"]
-    replace = issue["estimated_replacement_cost"]
+    repair, replace = brief["estimated_repair_cost"], brief["estimated_replacement_cost"]
 
     use_llm = KNOBS.use_llm_for_decision_analysis
     BUS.publish("reasoning_path", tool="assess_repair_vs_replace",
@@ -223,22 +233,19 @@ async def assess_repair_vs_replace(args):
 
     if use_llm:
         try:
-            result = await llm_assess_repair_vs_replace(
-                appliance=appliance, age_years=age, warranty=warranty,
-                repair_cost=repair, replacement_cost=replace,
-                issue_description=args["issue_description"],
-                triage_findings=args["triage_findings"],
-                comparable_jobs=STORE.similar_issues(appliance["appliance_type"]),
-            )
-        except Exception as exc:  # noqa: BLE001
+            result = await subagent.run(brief)
+        except Exception as exc:  # noqa: BLE001 - fall back rather than fail the loop
             BUS.publish("reasoning_path", tool="assess_repair_vs_replace", path="fallback",
-                        detail=f"LLM call failed, fell back to the heuristic: {exc}")
-            result = assess_heuristic(age, repair, replace, warranty["in_warranty"])
+                        detail=f"Subagent failed, fell back to the heuristic: "
+                               f"{type(exc).__name__}: {exc}")
+            result = assess_heuristic(age, repair, replace, brief["in_warranty"])
     else:
-        result = assess_heuristic(age, repair, replace, warranty["in_warranty"])
+        result = assess_heuristic(age, repair, replace, brief["in_warranty"])
 
     result["estimated_repair_cost"] = repair
     result["estimated_replacement_cost"] = replace
+    # Exactly what the subagent was given, so the log shows what the judgement rests on.
+    result["brief"] = brief
     assessment = assessments.record(issue, appliance["id"], result)
     STORE.save()
     return ok(assessment)
@@ -536,7 +543,7 @@ async def conclude_booking(args):
 
 ALL_TOOLS = [
     send_resident_message,
-    get_appliance, check_warranty, search_similar_issues, get_property_data, check_inventory,
+    get_appliance, check_warranty, get_property_data, check_inventory,
     get_triage_steps, assess_repair_vs_replace,
     find_available_technician, book_visit, confirm_visit,
     send_ops_message, send_engineer_message, send_email, close_job,
@@ -554,8 +561,8 @@ def qualified(name: str) -> str:
 # in this list falls through to the can_use_tool gate - which is how the replacement path
 # is held. book_visit is deliberately absent.
 AUTONOMOUS_TOOLS = [qualified(n) for n in [
-    "send_resident_message", "get_appliance", "check_warranty", "search_similar_issues",
-    "get_property_data", "check_inventory", "get_triage_steps", "assess_repair_vs_replace",
+    "send_resident_message", "get_appliance", "check_warranty", "get_property_data",
+    "check_inventory", "get_triage_steps", "assess_repair_vs_replace",
     "find_available_technician", "confirm_visit", "send_ops_message",
     "send_engineer_message", "close_job",
     "complete_triage", "submit_recommendation", "conclude_booking",

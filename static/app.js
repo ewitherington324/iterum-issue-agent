@@ -549,8 +549,10 @@ function handle(e) {
     }
 
     case "tool_call":
-      traceCard("tool", e.iterum_tool ? "green" : "red",
-        e.iterum_tool ? "tool" : "NOT AN ITERUM TOOL", e.tool,
+      // The repair-vs-replace subagent's own lookups arrive on the same stream, tagged.
+      traceCard("tool", e.iterum_tool ? (e.agent === "subagent" ? "blue" : "green") : "red",
+        e.iterum_tool ? (e.agent === "subagent" ? "subagent tool" : "tool")
+                      : "NOT AN ITERUM TOOL", e.tool,
         [pre(e.input)], false);
       // Keep the header counter live rather than only updating it at phase boundaries.
       if (typeof e.iteration === "number") {

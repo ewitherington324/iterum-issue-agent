@@ -24,7 +24,7 @@ from claude_agent_sdk import (
     ThinkingBlock,
 )
 
-from . import gates, prompts, session, trace
+from . import assessments, gates, prompts, session, trace
 from .config import KNOBS, RECOMMENDATION_CODES
 from .events import BUS
 from .store import STORE
@@ -141,8 +141,13 @@ async def run_scenario(scenario_id: str, auto_play: bool = True) -> dict:
             decision = await _phase(client, s, session.DECISION, prompts.DECISION.format(
                 findings=triage["findings"]))
             if decision is None:
-                BUS.publish("run_incomplete", loop=session.DECISION,
-                            detail="The decision loop ended without calling submit_recommendation.")
+                # A refused assessment (in warranty, or no fault reference) has nothing to
+                # submit; the main agent is told to hand to ops. That is a proper ending.
+                latest = assessments.latest(STORE.active_issue())
+                if not (latest and latest["status"] == "refused"):
+                    BUS.publish("run_incomplete", loop=session.DECISION,
+                                detail="The decision loop ended without calling "
+                                       "submit_recommendation.")
                 return _finish(s)
 
             # --- Loop 3: booking ------------------------------------------------------
@@ -181,7 +186,8 @@ def _finish(s) -> dict:
         "engineer_decision": s.engineer_decision,
         "pm_decision": s.pm_decision,
         "tool_calls": len(s.tool_calls),
-        "cost_usd": round(s.cost_usd, 4),
+        "cost_usd": round(s.cost_usd + s.subagent_cost_usd, 4),
+        "subagent_cost_usd": round(s.subagent_cost_usd, 4),
         "non_iterum_tool_calls": [c["tool"] for c in s.tool_calls
                                   if c["tool"] in {"Read", "Write", "Edit", "Bash", "Grep",
                                                    "Glob", "WebSearch", "WebFetch"}],

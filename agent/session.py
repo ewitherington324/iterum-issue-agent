@@ -63,6 +63,9 @@ class IssueSession:
         self.proposed_slots: list[str] = []
         self.tool_calls: list[dict] = []
         self.cost_usd: float = 0.0
+        # The subagent is a separate session with its own bill; cost_usd is the main
+        # agent's running total as reported by its ResultMessage.
+        self.subagent_cost_usd: float = 0.0
         self.finished = asyncio.Event()
 
     # --- loop control ---------------------------------------------------------------

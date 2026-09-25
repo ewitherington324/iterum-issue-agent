@@ -78,6 +78,9 @@ Read-only:
 Not `check_warranty`: warranty is settled in triage and in-warranty jobs never reach this point.
 The precondition check above is a guard in code, not a second lookup.
 
+It returns its answer by calling `submit_assessment`, an exit tool rather than a data tool
+(CLAUDE.md invariant 5), which validates the answer against the output table.
+
 ## Inputs
 
 Passed by the main agent at the end of triage:
@@ -87,8 +90,13 @@ Passed by the main agent at the end of triage:
 - Troubleshooting steps attempted and what happened
 - The resident's **symptom descriptions, verbatim** ("clicking but won't light", "smells of
   burning") — only statements about the appliance or fault
-- Warranty status (must be out of warranty)
 - Known gaps, e.g. no photo available
+
+Supplied by code from Iterum records, not by the main agent:
+
+- Warranty status (must be out of warranty), read from the store for the precondition guard
+- Estimated repair and replacement costs, from the issue record — the skill weighs repair
+  economics, and these are figures the system already knows
 
 On re-invocation, additionally:
 

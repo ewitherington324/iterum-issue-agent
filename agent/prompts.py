@@ -133,13 +133,29 @@ DECISION = """Triage is complete. Here is what it established:
 
 Run the REPAIR VS REPLACE loop.
 
-The repair-versus-replace judgement is not yours to make. Call assess_repair_vs_replace once, \
-passing the appliance id, the issue as reported and what triage established. It returns an \
-assessment with an assessment_id.
+The repair-versus-replace judgement is not yours to make. A separate assessor makes it, and \
+it sees only the fault evidence you pass to assess_repair_vs_replace. Call it once with:
 
-Then call submit_recommendation with that assessment_id and nothing else. The assessment's \
-code, confidence and rationale are submitted exactly as it produced them. You cannot change \
-them, and you should not restate or reinterpret them."""
+  - confirmed_fault: one or two sentences on what is wrong, as triage established it
+  - troubleshooting: each step the resident tried, and what happened
+  - resident_symptoms: the resident's own words about the appliance, copied exactly from \
+their messages. You may shorten a message to the part about the fault
+  - known_gaps: evidence you could not get, such as a photo
+
+Only what is about the appliance or the fault goes in. "It's clicking but won't light" goes \
+in. "The last engineer was useless", "I can only do Tuesdays" and "I've reported this twice" \
+stay out - if one sentence mixes both, quote only the part about the fault. Do not include \
+your own view of whether it should be repaired or replaced. Warranty and costs are added \
+from Iterum's records, so do not pass them. If the input is refused, the reason says what to \
+fix.
+
+It returns an assessment with an assessment_id. Then call submit_recommendation with that \
+assessment_id and nothing else. The assessment's code, confidence and rationale are \
+submitted exactly as it produced them. You cannot change them, and you should not restate or \
+reinterpret them.
+
+If the assessment comes back refused, there is nothing to submit: follow the instruction in \
+the result and hand the thread to ops."""
 
 
 BOOKING = """The repair-vs-replace assessment is logged as {assessment_id}:
