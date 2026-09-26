@@ -59,6 +59,9 @@ RVR_SCENARIOS = ["clear_repair", "likely_replacement", "cracked_hob", "parts_del
                  "resident_rejects", "new_fault_info", "irrelevant_info",
                  "reassessment_cap", "fallback_repair", "frustrated_repair",
                  "messy_resident"]
+# Free play: the resident may take any path, so routing is expected to vary. These are judged
+# on their outcome checks, not on routing matching across runs.
+FREE_PLAY_SCENARIOS = {"messy_resident"}
 # Module 3 step 5: the spec's "New scenarios".
 NEW_SCENARIOS = ["new_fault_info", "irrelevant_info", "reassessment_cap",
                  "fallback_repair", "frustrated_repair", "messy_resident"]
@@ -818,7 +821,10 @@ def write_markdown(rows: list[dict], md_path: Path) -> None:
         routes = [r["routing"] for r in runs]
         codes = ", ".join(f"{r['code'] or '—'} {conf(r)}" for r in runs)
         n = f"{len(runs)} run{'s' if len(runs) != 1 else ''}"
-        if len(runs) < 3:
+        if sid in FREE_PLAY_SCENARIOS:
+            verdict = ("consistency **not applicable** (free play: judged on outcome checks, "
+                       f"not matching routing; {n} on {latest})")
+        elif len(runs) < 3:
             verdict = f"incomplete ({n} of 3 on {latest})"
         elif len(set(routes)) == 1:
             verdict = f"**consistent** across {n} on {latest}"

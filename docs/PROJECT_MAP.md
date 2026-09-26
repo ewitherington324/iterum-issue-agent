@@ -75,10 +75,8 @@ Because of this, **the GitHub repo should stay private.**
 
 Most relevant to Module 3 first.
 
-1. **The main agent can overwrite the assessment.** In the cracked-hob run, the repair-vs-replace
-   call correctly capped confidence at 0.6 (no photo). The main agent then submitted 0.78, which
-   crossed the threshold. Nothing checks that the two agree (`docs/module2/verification.md` §4.3).
-2. **Confidence threshold doesn't match the PRD.** Resolved in Module 3 step 5: the code now uses the PRD's 0.7.
+1. ~~**The main agent can overwrite the assessment.**~~ **Resolved (Module 3):** `submit_recommendation` now takes an assessment ID only; code and confidence come from the log.
+2. ~~**Confidence threshold doesn't match the PRD.**~~ **Resolved (Module 3 step 5):** the code now uses the PRD's 0.7.
 3. **Photos can't be supplied.** Nothing in the system handles them, so the "crack confirmed by
    photo" path in the skill can't be reached.
 4. **No guardrail has fired in a live run.** Routing was correct every time, so the backstops are untested.
@@ -95,11 +93,16 @@ Most relevant to Module 3 first.
 6. **Four appliance types have no fault categories** in Iterum's data (washing machine, tumble
    dryer, microwave, wine cooler), so only their general guidance ever reaches the model.
 7. **Same-day booking.** The PRD's slot rule allows booking for this afternoon; a real version needs notice.
-8. **One run per scenario.** Nothing yet shows the results are consistent.
+8. ~~**One run per scenario.**~~ **Resolved (Module 3 step 5):** each repair-vs-replace scenario run 3× on one commit; results in `docs/module3/results/step5.md`.
 
 ## Next
 
-- **Module 3 (now):** repair vs. replace becomes a subagent.
+- **Module 3 is done** (tag `module-3`): repair vs. replace is a subagent whose answer the main
+  agent cannot change. Spec: `docs/module3/SUBAGENT_SPEC.md`; summary: `docs/module3/FACTS.md`;
+  results: `docs/module3/results/step5.md`.
+- **Fire drill still leans on the simulator in triage.** In `reassessment_cap` runs 7 and 8 the
+  simulated resident reported the grill cold during triage, against its script, so the first
+  scripted symptom wasn't new and the cap was never needed. The outcomes were correct; the
+  scenario needs the triage answers pinned too before it reliably tests the cap.
 - **Next steps, noted not built:** scheduling as a reasoning subagent (replacing the fixed slot
-  rule); an engineer brief writer.
-- module 3 sub-agent spec found here: docs/module3/SUBAGENT_SPEC.md
+  rule); an engineer brief writer; photo handling (open issue #3).
