@@ -111,6 +111,8 @@ def build_world():
                     "flat": "0411", "property_id": "prop_canalside"},
         "res_007": {"id": "res_007", "name": "Ruth Castellano", "phone": "+44 7700 900388",
                     "flat": "1408", "property_id": "prop_hawkings"},
+        "res_008": {"id": "res_008", "name": "Nadia Kowalczyk", "phone": "+44 7700 900412",
+                    "flat": "0617", "property_id": "prop_hawkings"},
     }
 
     property_managers = {
@@ -171,6 +173,15 @@ def build_world():
             "warranty_months": 24, "oem": "Electrolux",
             "retail_price": 359.00, "iterum_price": 284.00,
         },
+        # Module 3 step 5 (new_fault_info). Same real model as app_004, older and out of
+        # warranty, so the re-assessment has an age question to weigh.
+        "app_008": {
+            "id": "app_008", "property_id": "prop_hawkings", "flat": "0617",
+            "appliance_type": "Fridge-Freezer", "brand": "Bosch", "model": "KGN34NWEAG",
+            "serial": "FF-SN-3071", "installation_date": _years_ago(6, 4),
+            "warranty_months": 24, "oem": "BSH Home Appliances",
+            "retail_price": 599.00, "iterum_price": 471.00,
+        },
     }
 
     inventory = {
@@ -188,6 +199,10 @@ def build_world():
                            "appliance_type": "Hob", "stock": 0, "lead_time_days": 9},
         "SKU-FF-THERMOSTAT": {"sku": "SKU-FF-THERMOSTAT", "description": "Fridge-freezer thermostat",
                               "appliance_type": "Fridge-Freezer", "stock": 4, "lead_time_days": 0},
+        "SKU-FF-FANMOTOR": {"sku": "SKU-FF-FANMOTOR", "description": "Fridge-freezer evaporator fan motor",
+                            "appliance_type": "Fridge-Freezer", "stock": 3, "lead_time_days": 0},
+        "SKU-DW-DOORSPRING": {"sku": "SKU-DW-DOORSPRING", "description": "Dishwasher door hinge spring and cable kit",
+                              "appliance_type": "Dishwasher", "stock": 5, "lead_time_days": 0},
         "SKU-HOOD-FANMOTOR": {"sku": "SKU-HOOD-FANMOTOR", "description": "Extractor hood fan motor",
                               "appliance_type": "Hood", "stock": 1, "lead_time_days": 0},
     }
@@ -247,6 +262,17 @@ def historical_issues():
         {"appliance_type": "Fridge-Freezer", "fault_slug": "fridge_not_cooling",
          "brand": "Bosch", "age_years": 0.5, "outcome": "OEM warranty",
          "notes": "In warranty. Handled by BSH engineer, not Iterum."},
+        # Module 3 step 5 scenarios: comparables for the new fault categories.
+        {"appliance_type": "Fridge-Freezer", "fault_slug": "fridge_not_cooling",
+         "brand": "Bosch", "age_years": 5.5, "outcome": "Repair",
+         "repair_cost": 175.0, "notes": "Evaporator fan motor seized. Replaced; cooling restored."},
+        {"appliance_type": "Fridge-Freezer", "fault_slug": "fridge_not_cooling",
+         "brand": "Hotpoint", "age_years": 7.0, "outcome": "Replacement",
+         "replacement_cost": 560.0, "notes": "Compressor cutting out on thermal overload, "
+                                             "both compartments warming. Beyond economic repair."},
+        {"appliance_type": "Dishwasher", "fault_slug": "dishwasher_door_issue",
+         "brand": "Bosch", "age_years": 3.0, "outcome": "Repair",
+         "repair_cost": 85.0, "notes": "Door hinge spring snapped; spring and cable kit fitted."},
     ]
 
 

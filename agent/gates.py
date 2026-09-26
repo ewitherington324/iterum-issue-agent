@@ -7,12 +7,17 @@ of `allowed_tools`, which means every booking attempt falls through to here.
 That placement is the whole design. The gate is on the *action*, not on the messaging -
 so even if the agent never asked the engineer, or decided it had heard enough, a
 replacement booking is still refused until the approvals actually exist in the record.
+
+Module 3: which path applies is read from the SUBMITTED recommendation code, never from the
+`visit_type` the main agent passes. Before this, a code A booked as "repair" walked the
+autonomous path - the same override problem as the Module 2 confidence overwrite, one step
+later. The only way a replace code becomes a repair booking is an engineer override.
 """
 
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 
-from . import session
-from .config import KNOBS
+from . import assessments, session
+from .config import KNOBS, REPLACE_CODES
 from .events import BUS
 from .store import STORE
 from .trace import log_decision, short_name
@@ -40,21 +45,56 @@ async def can_use_tool(tool_name, input_data, context):
     cost = issue.get("estimated_replacement_cost") or 0.0
     over_threshold = cost > KNOBS.pm_cost_threshold_gbp
 
+    # --- The booking must rest on the current, submitted recommendation ---------------
+    submitted_id = issue.get("recommendation_assessment_id")
+    code = issue.get("recommendation")
+    if not submitted_id or code is None:
+        reason = ("Blocked: no repair-vs-replace recommendation has been submitted for this "
+                  "issue, so there is nothing to book against.")
+        return _deny(name, "no_recommendation", reason, cost, over_threshold, path="none")
+    current = assessments.latest_assessed(issue)
+    if current is not None and current["assessment_id"] != submitted_id:
+        reason = (f"Blocked: the submitted recommendation {submitted_id} has been superseded "
+                  f"by {current['assessment_id']}. Submit {current['assessment_id']} with "
+                  "submit_recommendation, then follow the booking rules for its code.")
+        return _deny(name, "superseded_assessment", reason, cost, over_threshold,
+                     path="none")
+
+    replacement = code in REPLACE_CODES
+    engineer = s.engineer_decision
+
     # --- Repair path: fully autonomous (PRD 3.4) --------------------------------------
-    if not _is_replacement(visit_type):
+    if not replacement:
+        if _is_replacement(visit_type):
+            reason = (f"Blocked: the submitted recommendation is code {code} (repair), but "
+                      f"this booking is a {visit_type!r}. Book the visit the recommendation "
+                      "supports; the visit type does not change the recommendation.")
+            return _deny(name, "visit_type_mismatch", reason, cost, over_threshold,
+                         path="repair")
         BUS.publish("gate_check", tool=name, outcome="allow", path="repair",
-                    detail="Repair path is fully autonomous - no human gate applies.")
-        log_decision("gate_check", tool=name, path="repair", outcome="allow")
+                    detail=f"Submitted code {code} is a repair - no human gate applies.")
+        log_decision("gate_check", tool=name, path="repair", outcome="allow", code=code)
         return PermissionResultAllow(updated_input=input_data)
 
-    # --- Replacement path: sequentially gated -----------------------------------------
-    engineer = s.engineer_decision
+    # An engineer override is the one route from a replace code to a repair booking.
+    if engineer and engineer.get("decision") == "override" and not _is_replacement(visit_type):
+        detail = (f"Submitted code {code} is a replacement, but {engineer.get('engineer')} "
+                  f"overrode it ({engineer.get('note') or 'no note'}). Booking the repair "
+                  "the engineer called for.")
+        BUS.publish("gate_check", tool=name, outcome="allow", path="engineer_override",
+                    detail=detail)
+        log_decision("gate_check", tool=name, path="engineer_override", outcome="allow",
+                     code=code, engineer=engineer, visit_type=visit_type)
+        return PermissionResultAllow(updated_input=input_data)
+
+    # --- Replacement path: sequentially gated, whatever visit_type says ---------------
     pm = s.pm_decision
 
     if engineer is None:
-        reason = ("Blocked: this is a replacement booking and no engineer has confirmed the "
-                  "recommendation yet. Call send_engineer_message first and wait for their "
-                  "answer.")
+        reason = (f"Blocked: the submitted recommendation is code {code}, a replacement, "
+                  "so this booking needs the engineer's confirmation whatever the visit "
+                  "type, and no engineer has confirmed it yet. Call send_engineer_message "
+                  "first and wait for their answer.")
         return _deny(name, "awaiting_engineer", reason, cost, over_threshold)
 
     if engineer.get("decision") == "override":
@@ -87,9 +127,10 @@ async def can_use_tool(tool_name, input_data, context):
     return PermissionResultAllow(updated_input=input_data)
 
 
-def _deny(tool: str, rule: str, reason: str, cost: float, over_threshold: bool):
-    BUS.publish("gate_check", tool=tool, outcome="deny", path="replacement",
+def _deny(tool: str, rule: str, reason: str, cost: float, over_threshold: bool,
+          path: str = "replacement"):
+    BUS.publish("gate_check", tool=tool, outcome="deny", path=path,
                 rule=rule, detail=reason)
-    log_decision("gate_denied", tool=tool, rule=rule, reason=reason,
+    log_decision("gate_denied", tool=tool, rule=rule, reason=reason, path=path,
                  cost=cost, over_threshold=over_threshold)
     return PermissionResultDeny(message=reason, interrupt=False)

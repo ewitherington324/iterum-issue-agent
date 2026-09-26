@@ -47,9 +47,9 @@ Troubleshooting steps must be safe for a resident to do alone. No electrical wor
 disassembly, nothing behind a fixed panel. No tools beyond what any household has. Filters, \
 seals, visible hoses, settings and power cycling are fine.
 
-Any recommendation you make about repair versus replacement is PROVISIONAL ROUTING to decide \
-what kind of visit to send. It is never a certain diagnosis, and you must never present it to \
-anyone as one.
+The repair-versus-replace recommendation is PROVISIONAL ROUTING to decide what kind of visit \
+to send. It comes from a separate assessment, not from you. It is never a certain diagnosis, \
+and you must never present it to anyone as one.
 
 In-warranty appliances leave your flow entirely. The manufacturer dispatches their own \
 engineer. You do not book, quote or schedule anything for them.
@@ -133,29 +133,46 @@ DECISION = """Triage is complete. Here is what it established:
 
 Run the REPAIR VS REPLACE loop.
 
-Use what triage found, the appliance's age and history, and comparable past jobs to decide \
-whether this is a repair or a replacement. assess_repair_vs_replace gives you a structured \
-assessment; treat it as an input to your judgement, not as the answer. If comparable jobs \
-disagree with it, or triage found something the assessment did not account for, say so.
+The repair-versus-replace judgement is not yours to make. A separate assessor makes it, and \
+it sees only the fault evidence you pass to assess_repair_vs_replace. Call it once with:
 
-Pay particular attention to any past job that was booked as a repair and became a replacement \
-on site. Catching that in advance is the main reason this step exists.
+  - troubleshooting: each step the resident tried, and what happened
+  - resident_symptoms: the resident's own words about the appliance, copied exactly from \
+their messages. You may shorten a message to the part about the fault
+  - known_gaps: evidence you could not get, such as a photo
 
-When you have a view, call submit_recommendation with the code, your confidence between 0 and \
-1, and your reasoning. The confidence threshold in use is {threshold}. If you land below it, \
-still submit - but say in the rationale what you are uncertain about."""
+Pass what the resident observed and what was tried, not what you think it means. "Resident \
+ran a fingernail over the line - could not tell if it catches" is an observation. \
+"Presentation is consistent with a thermal-shock crack through the glass rather than a \
+surface scorch mark" is your interpretation, and must not be passed. The assessor draws its \
+own conclusions from the evidence.
+
+Only what is about the appliance or the fault goes in. "It's clicking but won't light" goes \
+in. "The last engineer was useless", "I can only do Tuesdays" and "I've reported this twice" \
+stay out - if one sentence mixes both, quote only the part about the fault. Do not include \
+your own view of whether it should be repaired or replaced. Warranty and costs are added \
+from Iterum's records, so do not pass them. If the input is refused, the reason says what to \
+fix.
+
+It returns an assessment with an assessment_id. Then call submit_recommendation with that \
+assessment_id and nothing else. The assessment's code, confidence and rationale are \
+submitted exactly as it produced them. You cannot change them, and you should not restate or \
+reinterpret them.
+
+If the assessment comes back refused, there is nothing to submit: follow the instruction in \
+the result and hand the thread to ops."""
 
 
-BOOKING = """Your recommendation is logged:
+BOOKING = """The repair-vs-replace assessment is logged as {assessment_id}:
 
   Code {code} - {code_meaning}
-  Confidence {confidence} (threshold {threshold})
+  Confidence {confidence} (threshold {threshold}) - {threshold_status}
   {rationale}
 
 Run the BOOKING loop.
 
 If this is a REPLACEMENT (code A or C), it is gated. The engineer must confirm or override \
-your recommendation first - send it to them with send_engineer_message. If they override you, \
+the recommendation first - send it to them with send_engineer_message. If they override it, \
 their assessment wins; re-plan on that basis. If the cost is over the property manager's \
 threshold of GBP {pm_threshold:.0f}, you also need their approval by email before booking.
 
@@ -165,7 +182,17 @@ Either way: check stock for the parts this job will need before you propose a da
 is short, ask ops to order it and add the lead time - the earliest viable date is today plus \
 the lead time. Then find a slot and propose ONE date to the resident at a time. If they turn \
 it down, offer the next qualifying slot. After {max_rejections} rejections, stop proposing and \
-hand the thread to ops.
+hand the thread to ops. A reply that tells you something new about the fault (see below) is not \
+a rejection of the date.
+
+If, before a visit is booked, the resident tells you something NEW about the appliance or the \
+fault - a symptom, something they saw, heard or tried - call reassess_repair_vs_replace with the \
+latest assessment_id and their new words, copied exactly. Do not use it for scheduling, \
+complaints or because you would prefer a different answer. If it comes back with a new \
+assessment, submit that with submit_recommendation before booking, and follow the rules above \
+for its code - earlier approvals do not carry over. If it comes back no_change or \
+reassessment_failed, there is no new assessment: carry on as before. It can be used at most \
+twice; a third time sends the thread to ops, and the result will tell you what to do.
 
 When the resident accepts, book the visit and confirm it. Then tell them what is happening and \
 when, and close the job.

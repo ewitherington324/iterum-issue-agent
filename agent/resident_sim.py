@@ -80,18 +80,38 @@ async def generate_reply(session) -> str:
     return "".join(b.text for b in response.content if b.type == "text").strip()
 
 
+def scripted_reply(session) -> str | None:
+    """The next scripted reply once a date has been offered, or None to let the model play.
+
+    For a scenario whose checks need one exact path (reassessment_cap, the fire drill), the
+    persona's `scripted_after_offer` pins the resident's replies from the first date offer
+    onwards: the model playing the resident went off-script in step 5 (a held-back symptom in
+    triage, then accepting the first date), and the cap was never reached. "Offered" means a
+    slot has been found; the agent's next message is the offer. Once the script runs out the
+    model takes over again.
+    """
+    script = session.scenario.get("resident_persona", {}).get("scripted_after_offer") or []
+    if not session.proposed_slots or session.scripted_replies_used >= len(script):
+        return None
+    reply = script[session.scripted_replies_used]
+    session.scripted_replies_used += 1
+    return reply
+
+
 def schedule_reply(session) -> None:
     """Fire-and-forget the simulated reply so the tool handler stays awaiting."""
 
     async def _run():
+        scripted = scripted_reply(session)
         try:
             await asyncio.sleep(0.6)  # let the outbound message render first
-            reply = await generate_reply(session)
+            reply = scripted or await generate_reply(session)
         except Exception as exc:  # noqa: BLE001
             BUS.publish("error", where="resident_sim", detail=str(exc))
             reply = "sorry, not sure - can you explain what you mean?"
         if session.awaiting_resident:
-            BUS.publish("resident_message", direction="in", text=reply, simulated=True)
+            BUS.publish("resident_message", direction="in", text=reply, simulated=True,
+                        scripted=scripted is not None)
             session.deliver_resident_reply(reply)
 
     asyncio.create_task(_run())

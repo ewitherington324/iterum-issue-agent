@@ -136,7 +136,7 @@ function plain(cls, text) {
    the parts that ARE the skills' contribution, so the before/after is visible rather
    than asserted:
 
-     - decision skill  -> contra_indicators, evidence_gaps, determinative
+     - decision skill  -> contra_indicators, evidence_missing, limits_applied, determinative
      - triage skill    -> fault_slug and whether its reference section matched
 
    Both fall back quietly: on the rules-based path there are no contra_indicators and
@@ -196,8 +196,8 @@ function assessmentCard(a) {
   }
 
   if (a.rationale) card.appendChild(textBlock("Rationale", a.rationale));
-  if (a.key_factors && a.key_factors.length)
-    card.appendChild(listBlock("Key factors", a.key_factors));
+  if (a.evidence_used && a.evidence_used.length)
+    card.appendChild(listBlock("Evidence used", a.evidence_used));
 
   // The headline addition. Empty is now a validation error on a weighed call, so an
   // absent list here means the rules-based path, not a silent miss.
@@ -205,12 +205,20 @@ function assessmentCard(a) {
     card.appendChild(listBlock("Contra-indicators \u2014 what argues against this code",
       a.contra_indicators, "contra"));
   }
-  if (a.evidence_gaps && a.evidence_gaps.length)
-    card.appendChild(listBlock("Evidence gaps", a.evidence_gaps, "gaps"));
+  if (a.evidence_missing && a.evidence_missing.length)
+    card.appendChild(listBlock("Evidence missing", a.evidence_missing, "gaps"));
+  if (a.limits_applied && a.limits_applied.length)
+    card.appendChild(listBlock("Confidence limits applied",
+      a.limits_applied.map((l) => `${Number(l.limit).toFixed(2)} \u2014 ${l.reason}`), "gaps"));
+  if (a.confidence_capped)
+    card.appendChild(textBlock("Confidence capped",
+      `Reported ${Number(a.confidence_capped.reported).toFixed(2)}, held at ` +
+      `${Number(a.confidence_capped.capped_to).toFixed(2)} by its own reported limit.`, "gaps"));
 
   const src = el("div", "skill-src");
   src.appendChild(el("span", "pill grey", a.skill || "rules-based heuristic"));
-  src.appendChild(el("span", null, a.source === "llm_reasoning_call"
+  if (a.assessment_id) src.appendChild(el("span", "pill grey", a.assessment_id));
+  src.appendChild(el("span", null, a.source === "subagent"
     ? "reasoning call" : "fallback path \u2014 no skill in context"));
   if (a.confidence_basis) src.appendChild(el("span", "basis", a.confidence_basis));
   card.appendChild(src);
@@ -274,6 +282,8 @@ function renderGates() {
       add("Channel", ctx.channel);
       add("Recommendation", ctx.recommendation);
       if (ctx.rationale) add("Rationale", ctx.rationale);
+      // Written by code from the assessment log, so the source is always shown.
+      if (ctx.assessment) add("From the log", ctx.assessment.headline);
     } else {
       add("To", ctx.to);
       add("Subject", ctx.subject);
@@ -341,6 +351,13 @@ function renderGates() {
       row.appendChild(el("span", `pill ${v.status === "confirmed" ? "green" : "grey"}`, v.status));
       row.appendChild(el("span", null, ` ${v.type} — ${v.slot_date} (${v.id})`));
       card.appendChild(row);
+      const n = v.engineer_note;
+      if (n) {
+        card.appendChild(el("div", "note", `Engineer note: ${n.headline}`));
+        if (n.not_assessed)
+          card.appendChild(el("div", "note",
+            `Not assessed: ${n.not_assessed.new_information.map((q) => `"${q}"`).join("; ")}`));
+      }
     });
     p.appendChild(card);
   }
@@ -431,7 +448,7 @@ const KNOB_SPECS = [
     hint: "PRD open question — needs a real number. Drop it below the replacement cost and the PM gate appears." },
   { key: "confidence_threshold", label: "Confidence threshold", min: 0.3, max: 1, step: 0.05,
     fmt: (v) => Number(v).toFixed(2),
-    hint: "PRD assumes 0.75, but what underlies the percentage is undecided." },
+    hint: "PRD working value 0.7, but what underlies the percentage is undecided." },
   { key: "max_slot_rejections", label: "Slot rejections before ops", min: 1, max: 6, step: 1,
     fmt: (v) => String(v), hint: "PRD 5.1. Enforced in the scheduling tool, not just asked for." },
 ];
@@ -541,8 +558,10 @@ function handle(e) {
     }
 
     case "tool_call":
-      traceCard("tool", e.iterum_tool ? "green" : "red",
-        e.iterum_tool ? "tool" : "NOT AN ITERUM TOOL", e.tool,
+      // The repair-vs-replace subagent's own lookups arrive on the same stream, tagged.
+      traceCard("tool", e.iterum_tool ? (e.agent === "subagent" ? "blue" : "green") : "red",
+        e.iterum_tool ? (e.agent === "subagent" ? "subagent tool" : "tool")
+                      : "NOT AN ITERUM TOOL", e.tool,
         [pre(e.input)], false);
       // Keep the header counter live rather than only updating it at phase boundaries.
       if (typeof e.iteration === "number") {

@@ -58,11 +58,21 @@ class IssueSession:
         # Guardrail state, set by tool handlers and read by the PreToolUse hook
         self.warranty_blocked: bool = False
         self.halted_reason: str | None = None
+        # Set when a third re-assessment request sends the thread to ops (Module 3 step 3).
+        self.assessment_escalated: bool = False
 
         self.slot_rejections: int = 0
         self.proposed_slots: list[str] = []
+        # Slots the resident answered with new fault information (the reply led to a
+        # re-invocation) - not rejections, so not counted towards the slot limit.
+        self.slots_not_rejected: set[str] = set()
+        # How many of the persona's scripted_after_offer replies have been sent.
+        self.scripted_replies_used: int = 0
         self.tool_calls: list[dict] = []
         self.cost_usd: float = 0.0
+        # The subagent is a separate session with its own bill; cost_usd is the main
+        # agent's running total as reported by its ResultMessage.
+        self.subagent_cost_usd: float = 0.0
         self.finished = asyncio.Event()
 
     # --- loop control ---------------------------------------------------------------
@@ -141,6 +151,7 @@ class IssueSession:
             "slot_rejections": self.slot_rejections,
             "warranty_blocked": self.warranty_blocked,
             "halted_reason": self.halted_reason,
+            "assessment_escalated": self.assessment_escalated,
             "cost_usd": round(self.cost_usd, 4),
         }
 

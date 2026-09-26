@@ -128,7 +128,7 @@ Confidence describes the strength of the evidence, not the severity of the fault
 | 0.5–0.79 | Factors mostly agree but the fault is not pinned down, or cost data is indicative rather than known |
 | Below 0.5 | Factors conflict, triage produced little, or the appliance record is incomplete |
 
-The loop exits rather than asking another question at `KNOBS.confidence_threshold` — currently 0.75, and live-editable from the demo UI because what underlies that number is still undecided. Read it from config rather than assuming it; if it moves, the skill should follow without being rewritten.
+The loop exits rather than asking another question at `KNOBS.confidence_threshold` — currently 0.7 (the PRD's working value), and live-editable from the demo UI because what underlies that number is still undecided. Read it from config rather than assuming it; if it moves, the skill should follow without being rewritten.
 
 Resist the pull to inflate confidence. An over-confident repair recommendation books a visit that fails; an honestly low one produces a better-prepared engineer. The confidence figure is also the number that will be scored against engineer findings once override data accumulates, so a habit of inflation destroys the dataset the PRD is trying to build.
 
@@ -177,6 +177,9 @@ This maps onto the `RepairVsReplace` model in `agent/reasoning.py`. The first fo
     "What argues against this code, stated as strongly as you can put it"
   ],
   "evidence_gaps": ["No model number on record"],
+  "limits_applied": [
+    {"limit": 0.6, "reason": "Which confidence ceiling applied, and what missing evidence triggered it"}
+  ],
   "determinative": false
 }
 ```

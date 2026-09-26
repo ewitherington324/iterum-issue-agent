@@ -15,11 +15,11 @@ from datetime import date, timedelta
 
 from claude_agent_sdk import ToolAnnotations, create_sdk_mcp_server, tool
 
-from . import session
-from .config import KNOBS, RECOMMENDATION_CODES
+from . import assessments, session, subagent, trace
+from .config import KNOBS, REPLACE_CODES
 from .events import BUS
 from .fallbacks import assess_heuristic, lookup_triage_steps
-from .reasoning import llm_assess_repair_vs_replace, llm_triage_steps
+from .reasoning import llm_triage_steps
 from .store import STORE
 
 RESIDENT_REPLY_TIMEOUT_S = 180
@@ -99,13 +99,7 @@ async def get_appliance(args):
     appliance = STORE.appliance(args["appliance_id"])
     if not appliance:
         return err(f"No appliance found with id {args['appliance_id']!r}.")
-    prop = STORE.property(appliance["property_id"])
-    return ok({
-        **{k: v for k, v in appliance.items() if k != "warranty_months"},
-        "age_years": STORE.appliance_age_years(appliance),
-        "property_name": prop["name"] if prop else None,
-        "operator": prop["operator"] if prop else None,
-    })
+    return ok(STORE.appliance_view(appliance))
 
 
 @tool("check_warranty",
@@ -126,16 +120,8 @@ async def check_warranty(args):
     return ok(result)
 
 
-@tool("search_similar_issues",
-      "Find comparable past jobs for this appliance type and fault, with what they actually "
-      "cost and how they were resolved. Use this to ground a repair-vs-replace call in real "
-      "outcomes rather than guesswork.",
-      {"appliance_type": str, "issue_description": str}, annotations=READ_ONLY)
-async def search_similar_issues(args):
-    matches = STORE.similar_issues(args["appliance_type"])
-    if not matches:
-        return ok(f"No comparable historical jobs held for {args['appliance_type']}.")
-    return ok({"appliance_type": args["appliance_type"], "comparable_jobs": matches})
+# search_similar_issues belongs to the repair-vs-replace subagent (agent/subagent.py).
+# The main agent never forms a repair-vs-replace view, so it has no use for comparables.
 
 
 @tool("get_property_data",
@@ -201,47 +187,214 @@ async def get_triage_steps(args):
 
 
 @tool("assess_repair_vs_replace",
-      "Assess whether this issue is a repair or a replacement. Returns a recommendation "
-      "code (A beyond economic repair, B repair, C low future value, D in warranty), a "
-      "confidence, and a rationale. This is provisional routing, not a diagnosis.",
-      {"appliance_id": str, "issue_description": str, "triage_findings": str})
+      "Hand the fault evidence to the repair-vs-replace subagent, which assesses it "
+      "separately from you. Pass only evidence about the appliance and the fault: each "
+      "troubleshooting step with what the resident observed, the resident's own words "
+      "about the appliance copied exactly (shorten a quote to the part about the fault if "
+      "needed), and any known gaps. Pass what the resident observed and what was tried, not "
+      "what you think it means. Leave out complaints, scheduling and your own view of the "
+      "outcome. Warranty and costs are added from Iterum records. The "
+      "result is logged with an assessment_id; submit it with submit_recommendation. This "
+      "is provisional routing, not a diagnosis.",
+      subagent.INPUT_SCHEMA)
 async def assess_repair_vs_replace(args):
-    appliance = STORE.appliance(args["appliance_id"])
-    if not appliance:
-        return err(f"No appliance found with id {args['appliance_id']!r}.")
-
     issue = STORE.active_issue()
+
+    # One first assessment per issue. After that the only way back in is
+    # reassess_repair_vs_replace, which carries the cap of two - so the cap cannot be
+    # stepped around by calling this again.
+    existing = assessments.latest(issue)
+    if existing is not None:
+        return err(f"This issue already has an assessment ({existing['assessment_id']}, "
+                   f"{existing['status']}). If the resident has said something new about the "
+                   "appliance or the fault, use reassess_repair_vs_replace. Otherwise submit "
+                   "the latest assessment, or follow the instruction it came with.")
+
+    # The input filter (spec: "Inputs"). Refused input goes back to the main agent with
+    # every reason at once, so it can correct and call again.
+    problems = subagent.check_input(issue, args, STORE.data["conversation_log"])
+    if problems:
+        trace.log_decision("assessment_input_rejected", problems=problems, tool_input=args)
+        return err("The assessment input was not accepted:\n- " + "\n- ".join(problems))
+
+    appliance = STORE.appliance(issue["appliance_id"])
+
+    # The precondition guard (spec: "Responsibilities"). Deliberately here rather than in
+    # the PreToolUse hook - see CLAUDE.md invariant 3.
+    reason = subagent.refusal_reason(issue, appliance)
+    if reason:
+        assessment = assessments.record(issue, appliance["id"], subagent.refused(reason),
+                                        status="refused")
+        STORE.save()
+        BUS.publish("guardrail", rule="assessment_refused", tool="assess_repair_vs_replace",
+                    detail=f"{assessment['assessment_id']}: {reason}")
+        return ok({**assessment, "next": (
+            "No recommendation was made, so there is nothing to submit. Hand the thread to "
+            "ops with send_ops_message (category 'escalation', or 'warranty_handoff' if in "
+            "warranty), tell the resident ops will be in touch, and close the job as "
+            "'handed_to_ops'.")})
+
+    brief = subagent.build_brief(issue, appliance, args)
+    result = await _run_assessment("assess_repair_vs_replace", appliance, brief)
+    assessment = assessments.record(issue, appliance["id"], result)
+    STORE.save()
+    return ok(assessment)
+
+
+async def _run_assessment(tool_name: str, appliance: dict, brief: dict) -> dict:
+    """First assessment: the subagent, or the heuristic if it is switched off or fails."""
     age = STORE.appliance_age_years(appliance)
-    warranty = STORE.warranty(appliance)
-    repair = issue["estimated_repair_cost"]
-    replace = issue["estimated_replacement_cost"]
+    repair, replace = brief["estimated_repair_cost"], brief["estimated_replacement_cost"]
+
+    def heuristic():
+        return assess_heuristic(age, repair, replace, brief["in_warranty"],
+                                fault_slug=brief["fault_slug"])
 
     use_llm = KNOBS.use_llm_for_decision_analysis
-    BUS.publish("reasoning_path", tool="assess_repair_vs_replace",
-                path="llm" if use_llm else "fallback")
+    BUS.publish("reasoning_path", tool=tool_name, path="llm" if use_llm else "fallback")
 
     if use_llm:
         try:
-            result = await llm_assess_repair_vs_replace(
-                appliance=appliance, age_years=age, warranty=warranty,
-                repair_cost=repair, replacement_cost=replace,
-                issue_description=args["issue_description"],
-                triage_findings=args["triage_findings"],
-                comparable_jobs=STORE.similar_issues(appliance["appliance_type"]),
-            )
-        except Exception as exc:  # noqa: BLE001
-            BUS.publish("reasoning_path", tool="assess_repair_vs_replace", path="fallback",
-                        detail=f"LLM call failed, fell back to the heuristic: {exc}")
-            result = assess_heuristic(age, repair, replace, warranty["in_warranty"])
+            result = await subagent.run(brief)
+        except Exception as exc:  # noqa: BLE001 - fall back rather than fail the loop
+            BUS.publish("reasoning_path", tool=tool_name, path="fallback",
+                        detail=f"Subagent failed, fell back to the heuristic: "
+                               f"{type(exc).__name__}: {exc}")
+            result = heuristic()
     else:
-        result = assess_heuristic(age, repair, replace, warranty["in_warranty"])
+        result = heuristic()
+    return _with_record_fields(result, brief)
 
-    result["code_meaning"] = RECOMMENDATION_CODES.get(result["code"], "unknown")
+
+def _with_record_fields(result: dict, brief: dict) -> dict:
+    repair, replace = brief["estimated_repair_cost"], brief["estimated_replacement_cost"]
     result["estimated_repair_cost"] = repair
     result["estimated_replacement_cost"] = replace
-    result["confidence_threshold"] = KNOBS.confidence_threshold
-    result["meets_threshold"] = result["confidence"] >= KNOBS.confidence_threshold
-    return ok(result)
+    # Exactly what the subagent was given, so the log shows what the judgement rests on.
+    result["brief"] = brief
+    return result
+
+
+@tool("reassess_repair_vs_replace",
+      "Use only when the resident has said something NEW about the appliance or the fault "
+      "since the latest assessment - a new symptom, something they saw, heard or tried. "
+      "Pass the latest assessment_id and the resident's new words, copied exactly. The "
+      "earlier evidence is carried over by the system; do not repeat it. The assessor "
+      "first decides whether the new information could change its judgement: if not, it "
+      "returns 'no_change' and the earlier assessment stands. Not for scheduling, complaints, or "
+      "because you would prefer a different answer. At most two per issue; a third goes "
+      "to ops with the assessment history.",
+      subagent.REINVOKE_SCHEMA)
+async def reassess_repair_vs_replace(args):
+    issue = STORE.active_issue()
+    previous = assessments.latest(issue)
+
+    # The same filter as a first assessment. Nothing rejected here reached the subagent,
+    # so none of it counts towards the cap.
+    problems = subagent.check_reinvocation(issue, args, STORE.data["conversation_log"],
+                                           previous)
+    if problems:
+        trace.log_decision("reassessment_input_rejected", problems=problems, tool_input=args)
+        return err("The re-assessment input was not accepted:\n- " + "\n- ".join(problems))
+
+    # The resident answered the latest slot with new fault information rather than turning
+    # it down, so it is not a rejection (spec: "When it's called", "Not a slot rejection").
+    s = session.current()
+    if s.proposed_slots:
+        s.slots_not_rejected.add(s.proposed_slots[-1])
+
+    # The cap (spec: "When it's called"). A guard in code, beside the warranty guard: the
+    # ops request is raised here so the history is attached whatever the main agent does.
+    if assessments.reassessment_count(issue) >= assessments.MAX_REASSESSMENTS:
+        escalation = assessments.escalate(issue, attempted={
+            "previous_assessment_id": args["previous_assessment_id"],
+            "new_information": list(args["new_information"])})
+        request = (f"Repair-vs-replace for {issue['id']} has been revisited "
+                   f"{assessments.MAX_REASSESSMENTS} times and the resident has given new "
+                   "information again. Please review. Assessment history attached.\n\n"
+                   + json.dumps({"attempted": escalation["attempted"],
+                                 "assessments": [_history_line(a) for a in
+                                                 escalation["history"]]},
+                                indent=2, default=str))
+        STORE.add_ops_request(request, "escalation")
+        s.assessment_escalated = True
+        STORE.save()
+        detail = (f"{issue['id']}: third re-assessment request. Sent to ops with "
+                  f"{len(escalation['history'])} assessments attached; the subagent was not run.")
+        BUS.publish("guardrail", rule="reassessment_cap", tool="reassess_repair_vs_replace",
+                    detail=detail)
+        BUS.publish("ops_message", category="escalation", request=request)
+        return ok({"status": "escalated_to_ops", "detail": detail, "next": (
+            "The assessment will not be revisited again, and ops has the full history. Do "
+            "not book or propose slots. Tell the resident the team will be in touch, close "
+            "the job as 'handed_to_ops', and if you are in the booking loop conclude it "
+            "with outcome 'handed_to_ops'.")})
+
+    appliance = STORE.appliance(issue["appliance_id"])
+    brief = subagent.build_reinvocation_brief(issue, appliance, previous,
+                                              args["new_information"])
+
+    # No fallback on re-invocation (spec: "When it's called"). The heuristic never reads the
+    # new information, so its answer would be a "new" assessment resting on nothing new -
+    # and submitting it would clear the engineer's and PM's approvals for no reason.
+    failure = None
+    if not KNOBS.use_llm_for_decision_analysis:
+        failure = "the subagent is switched off, and the fallback does not re-assess"
+        BUS.publish("reasoning_path", tool="reassess_repair_vs_replace", path="none",
+                    detail="Subagent switched off; the fallback is not run on re-invocation.")
+    else:
+        BUS.publish("reasoning_path", tool="reassess_repair_vs_replace", path="llm")
+        try:
+            result = _with_record_fields(await subagent.run(brief), brief)
+        except Exception as exc:  # noqa: BLE001 - the previous assessment stands instead
+            failure = f"subagent failed: {type(exc).__name__}: {exc}"
+            BUS.publish("reasoning_path", tool="reassess_repair_vs_replace", path="none",
+                        detail=f"{failure}. The previous assessment stands; the fallback "
+                               "is not run on re-invocation.")
+
+    if failure:
+        entry = subagent.reassessment_failed(previous, failure)
+        entry["brief"] = brief
+        entry["relevance_check"] = "not performed (re-assessment failed)"
+        status = "reassessment_failed"
+    elif "no_change_reason" in result and "code" not in result:
+        entry = subagent.no_change(previous, result["no_change_reason"])
+        entry["brief"] = brief
+        entry["relevance_check"] = "could not change the judgement for this fault (subagent)"
+        status = "no_change"
+    else:
+        entry = result
+        entry["relevance_check"] = "could change the judgement for this fault (subagent re-assessed)"
+        status = "assessed"
+    entry["reassesses"] = previous["assessment_id"]
+    assessment = assessments.record(issue, appliance["id"], entry, status=status)
+    STORE.save()
+
+    used = assessments.reassessment_count(issue)
+    remaining = assessments.MAX_REASSESSMENTS - used
+    submitted = issue.get("recommendation_assessment_id")
+    stands = (f"The submitted recommendation ({submitted}) stands; carry on." if submitted else
+              f"Submit {assessments.latest_assessed(issue)['assessment_id']} with "
+              "submit_recommendation.")
+    if status == "no_change":
+        nxt = ("The assessor found the new information could not change its judgement for this "
+               "fault, so nothing changes. " + stands)
+    elif status == "reassessment_failed":
+        nxt = ("The re-assessment could not be run, so there is no new assessment and nothing "
+               "to resubmit. " + stands + " The resident's new information is recorded and "
+               "will reach the engineer with the visit. This attempt counts towards the limit.")
+    else:
+        nxt = (f"Submit {assessment['assessment_id']} with submit_recommendation before "
+               "booking anything, then follow the booking rules for its code.")
+    return ok({**assessment, "reassessments_remaining": remaining, "next": nxt})
+
+
+def _history_line(a: dict) -> dict:
+    return {k: a.get(k) for k in ("assessment_id", "status", "source", "code", "confidence",
+                                  "rationale", "reassesses", "relevance_check",
+                                  "no_change_reason", "refusal_reason", "failure_reason")
+            if a.get(k) is not None} | {"new_information": (a.get("brief") or {})
+                                        .get("new_information", [])}
 
 
 # =====================================================================================
@@ -270,9 +423,10 @@ async def find_available_technician(args):
     s = session.current()
 
     # PRD 5.1: one slot at a time; after N rejections the thread goes to ops. Enforced
-    # here rather than left to the prompt, so the loop cannot propose indefinitely.
+    # here rather than left to the prompt, so the loop cannot propose indefinitely. A slot
+    # answered with new fault information (see reassess_repair_vs_replace) is not a rejection.
     if s.proposed_slots:
-        s.slot_rejections = len(s.proposed_slots)
+        s.slot_rejections = sum(1 for d in s.proposed_slots if d not in s.slots_not_rejected)
         if s.slot_rejections >= KNOBS.max_slot_rejections:
             BUS.publish("guardrail", rule="slot_rejections", tool="find_available_technician",
                         detail=f"{s.slot_rejections} slots already rejected "
@@ -323,6 +477,11 @@ async def book_visit(args):
         "slot_date": args["slot_date"],
         "status": "provisional",
     }
+    # What the engineer is told about the recommendation, built from the submitted
+    # assessment by code - including whether it came from the backup rules.
+    note = assessments.engineer_note(issue)
+    if note:
+        visit["engineer_note"] = note
     STORE.add_visit(visit)
     BUS.publish("visit", action="booked", visit=visit)
     return ok({"booked": visit, "next": "Call confirm_visit once the resident has accepted."})
@@ -375,6 +534,8 @@ async def send_engineer_message(args):
             "engineer": engineer, "channel": KNOBS.engineer_channel,
             "recommendation": args["recommendation"], "rationale": args["rationale"],
             "issue_id": s.issue_id,
+            # From the log, not the main agent's message, so the source cannot be left out.
+            "assessment": assessments.engineer_note(STORE.active_issue()),
         },
     )
     BUS.publish("gate_opened", gate="engineer", context=gate.context)
@@ -470,27 +631,76 @@ async def complete_triage(args):
 
 
 @tool("submit_recommendation",
-      "Exit the repair-vs-replace loop with your call. code is A, B, C or D. confidence is "
-      "0 to 1. State the recommendation as provisional routing, never as a certain diagnosis.",
-      {"code": str, "confidence": float, "rationale": str})
+      "Exit the repair-vs-replace loop by submitting the latest assessment for this issue. "
+      "Takes the assessment_id from assess_repair_vs_replace and nothing else - the code, "
+      "confidence and rationale are read from the assessment log, exactly as assessed.",
+      {"type": "object",
+       "properties": {"assessment_id": {"type": "string",
+                                        "description": "From assess_repair_vs_replace"}},
+       "required": ["assessment_id"],
+       "additionalProperties": False})
 async def submit_recommendation(args):
+    # The schema already rejects extra arguments; this repeats it in the handler so the
+    # rule holds however the tool is reached, and so the refusal says why.
+    extra = sorted(set(args) - {"assessment_id"})
+    if extra:
+        return err(f"submit_recommendation takes only assessment_id, not {extra}. The "
+                   "assessment's code, confidence and rationale are final and are read "
+                   "from the assessment log.")
+
+    issue = STORE.active_issue()
+    assessment_id = str(args.get("assessment_id", "")).strip()
+    assessment = assessments.find(issue, assessment_id)
+    if assessment is None:
+        return err(f"No assessment {assessment_id!r} exists for issue {issue['id']}. Call "
+                   "assess_repair_vs_replace and submit the assessment_id it returns.")
+    if assessment["status"] != "assessed":
+        return err(f"{assessment_id} has status '{assessment['status']}' and carries no "
+                   "recommendation to submit.")
+    # A no_change does not replace the recommendation it follows, so "latest" here means
+    # the newest assessment that carries one.
+    newest = assessments.latest_assessed(issue)
+    if assessment is not newest:
+        return err(f"{assessment_id} is not the latest assessment for this issue. Only "
+                   f"the latest can be submitted: {newest['assessment_id']}.")
+
     s = session.current()
-    code = args["code"].strip().upper()[:1]
-    payload = {"code": code, "confidence": args["confidence"],
-               "rationale": args["rationale"],
-               "code_meaning": RECOMMENDATION_CODES.get(code, "unknown"),
-               "meets_threshold": args["confidence"] >= KNOBS.confidence_threshold,
+    # Approvals were given on a specific assessment. A different one needs them again.
+    previous_id = issue.get("recommendation_assessment_id")
+    if previous_id and previous_id != assessment_id and (s.engineer_decision or s.pm_decision):
+        cleared = {"engineer": s.engineer_decision, "pm": s.pm_decision}
+        s.engineer_decision = s.pm_decision = None
+        BUS.publish("approvals_cleared", previous=previous_id, current=assessment_id,
+                    detail=f"Approvals given on {previous_id} do not carry over to "
+                           f"{assessment_id}.")
+        trace.log_decision("approvals_cleared", previous=previous_id,
+                           current=assessment_id, cleared=cleared)
+    code, confidence = assessment["code"], assessment["confidence"]
+    payload = {"assessment_id": assessment_id, "source": assessment["source"],
+               "code": code, "confidence": confidence,
+               "rationale": assessment["rationale"],
+               "code_meaning": assessment["code_meaning"],
+               "meets_threshold": assessments.meets_threshold(assessment),
                "threshold": KNOBS.confidence_threshold,
                "iterations": s.loop_iteration}
     s.record_exit(session.DECISION, payload)
-    issue = STORE.active_issue()
     issue["recommendation"] = code
-    issue["confidence"] = args["confidence"]
-    issue["recommendation_rationale"] = args["rationale"]
+    issue["confidence"] = confidence
+    issue["recommendation_rationale"] = assessment["rationale"]
+    issue["recommendation_assessment_id"] = assessment_id
     STORE.save()
     BUS.publish("loop_exit", loop=session.DECISION, **payload)
-    return ok(f"Recommendation {code} logged at confidence {args['confidence']:.2f} "
-              f"(threshold {KNOBS.confidence_threshold:.2f}).")
+    msg = (f"Assessment {assessment_id} submitted: code {code} at confidence "
+           f"{confidence:.2f} (threshold {KNOBS.confidence_threshold:.2f}).")
+    if assessment["source"] == "fallback":
+        msg += " " + assessments.FALLBACK_BELOW_THRESHOLD
+    if previous_id and previous_id != assessment_id:
+        msg += (f" It replaces {previous_id}. Booking now follows code {code}: "
+                + ("a replacement, so the engineer must confirm it (and the PM approve the "
+                   "cost if over threshold) before booking - any earlier approvals no "
+                   "longer apply." if code in REPLACE_CODES else
+                   "a repair, so no approval is needed."))
+    return ok(msg)
 
 
 @tool("conclude_booking",
@@ -508,8 +718,8 @@ async def conclude_booking(args):
 
 ALL_TOOLS = [
     send_resident_message,
-    get_appliance, check_warranty, search_similar_issues, get_property_data, check_inventory,
-    get_triage_steps, assess_repair_vs_replace,
+    get_appliance, check_warranty, get_property_data, check_inventory,
+    get_triage_steps, assess_repair_vs_replace, reassess_repair_vs_replace,
     find_available_technician, book_visit, confirm_visit,
     send_ops_message, send_engineer_message, send_email, close_job,
     complete_triage, submit_recommendation, conclude_booking,
@@ -526,8 +736,9 @@ def qualified(name: str) -> str:
 # in this list falls through to the can_use_tool gate - which is how the replacement path
 # is held. book_visit is deliberately absent.
 AUTONOMOUS_TOOLS = [qualified(n) for n in [
-    "send_resident_message", "get_appliance", "check_warranty", "search_similar_issues",
-    "get_property_data", "check_inventory", "get_triage_steps", "assess_repair_vs_replace",
+    "send_resident_message", "get_appliance", "check_warranty", "get_property_data",
+    "check_inventory", "get_triage_steps", "assess_repair_vs_replace",
+    "reassess_repair_vs_replace",
     "find_available_technician", "confirm_visit", "send_ops_message",
     "send_engineer_message", "close_job",
     "complete_triage", "submit_recommendation", "conclude_booking",

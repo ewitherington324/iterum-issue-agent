@@ -24,7 +24,7 @@ from claude_agent_sdk import (
     ThinkingBlock,
 )
 
-from . import gates, prompts, session, trace
+from . import assessments, gates, prompts, session, trace
 from .config import KNOBS, RECOMMENDATION_CODES
 from .events import BUS
 from .store import STORE
@@ -116,6 +116,18 @@ def _triage_prompt(s) -> str:
 async def run_scenario(scenario_id: str, auto_play: bool = True) -> dict:
     BUS.reset()
     scenario = STORE.load_scenario(scenario_id)
+    # A scenario can pin knobs it depends on (fallback_repair switches the subagent off).
+    # They hold for this run only; the dials go back to where they were afterwards.
+    pinned = scenario.get("knobs") or {}
+    restore = {k: getattr(KNOBS, k) for k in pinned if hasattr(KNOBS, k)}
+    KNOBS.update(pinned)
+    try:
+        return await _run(scenario, scenario_id, auto_play)
+    finally:
+        KNOBS.update(restore)
+
+
+async def _run(scenario: dict, scenario_id: str, auto_play: bool) -> dict:
     s = session.set_current(session.IssueSession(scenario))
     s.auto_play = auto_play
 
@@ -139,17 +151,31 @@ async def run_scenario(scenario_id: str, auto_play: bool = True) -> dict:
 
             # --- Loop 2: repair vs replace --------------------------------------------
             decision = await _phase(client, s, session.DECISION, prompts.DECISION.format(
-                findings=triage["findings"], threshold=KNOBS.confidence_threshold))
+                findings=triage["findings"]))
             if decision is None:
-                BUS.publish("run_incomplete", loop=session.DECISION,
-                            detail="The decision loop ended without calling submit_recommendation.")
+                # A refused assessment (in warranty, or no fault reference) has nothing to
+                # submit; the main agent is told to hand to ops. That is a proper ending.
+                # So is a third re-assessment request, which code has already sent to ops.
+                issue = STORE.active_issue()
+                latest = assessments.latest(issue)
+                if not ((latest and latest["status"] == "refused")
+                        or issue.get("assessment_escalated")):
+                    BUS.publish("run_incomplete", loop=session.DECISION,
+                                detail="The decision loop ended without calling "
+                                       "submit_recommendation.")
                 return _finish(s)
 
             # --- Loop 3: booking ------------------------------------------------------
             await _phase(client, s, session.BOOKING, prompts.BOOKING.format(
+                assessment_id=decision["assessment_id"],
                 code=decision["code"],
                 code_meaning=RECOMMENDATION_CODES.get(decision["code"], "unknown"),
                 confidence=decision["confidence"],
+                threshold_status=(
+                    "from the backup rules, so treated as below the threshold"
+                    if decision["source"] == "fallback" else
+                    "meets the threshold" if decision["meets_threshold"] else
+                    "below the threshold"),
                 threshold=KNOBS.confidence_threshold,
                 rationale=decision["rationale"],
                 pm_threshold=KNOBS.pm_cost_threshold_gbp,
@@ -180,7 +206,8 @@ def _finish(s) -> dict:
         "engineer_decision": s.engineer_decision,
         "pm_decision": s.pm_decision,
         "tool_calls": len(s.tool_calls),
-        "cost_usd": round(s.cost_usd, 4),
+        "cost_usd": round(s.cost_usd + s.subagent_cost_usd, 4),
+        "subagent_cost_usd": round(s.subagent_cost_usd, 4),
         "non_iterum_tool_calls": [c["tool"] for c in s.tool_calls
                                   if c["tool"] in {"Read", "Write", "Edit", "Bash", "Grep",
                                                    "Glob", "WebSearch", "WebFetch"}],

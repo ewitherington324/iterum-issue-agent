@@ -1,12 +1,12 @@
-"""The two LLM reasoning calls behind get_triage_steps and assess_repair_vs_replace.
+"""The triage reasoning call, and the repair-vs-replace output model.
 
-PRD 4.3 lists both as "LLM reasoning call", each with a rules-based fallback. These are
-separate, structured Claude API calls rather than something the agent free-forms, so the
-output shape is guaranteed and the same contract holds on both the LLM and the fallback
-path - which is what makes the A/B in the demo a fair comparison.
+PRD 4.3 lists both reasoning steps as "LLM reasoning call", each with a rules-based
+fallback. get_triage_steps is a separate, structured Claude API call. Since Module 3,
+repair vs replace is a subagent (agent/subagent.py); its output is still validated against
+RepairVsReplace below, so the same contract holds on the subagent and the fallback path -
+which is what makes the A/B in the demo a fair comparison.
 """
 
-import json
 from typing import Literal
 
 from anthropic import AsyncAnthropic
@@ -34,6 +34,11 @@ class TriageSteps(BaseModel):
                                          "nothing applies.")
 
 
+class ConfidenceLimit(BaseModel):
+    limit: float = Field(ge=0.0, le=1.0, description="The ceiling your instructions set.")
+    reason: str = Field(description="Which rule set it and what evidence was missing.")
+
+
 class RepairVsReplace(BaseModel):
     code: Literal["A", "B", "C", "D"]
     confidence: float = Field(description="0 to 1.", ge=0.0, le=1.0)
@@ -52,6 +57,12 @@ class RepairVsReplace(BaseModel):
         default=False,
         description="True when the code came from the fixed-outcome list (e.g. cracked hob "
                     "glass) rather than from weighing the six factors.")
+    limits_applied: list[ConfidenceLimit] = Field(
+        default_factory=list,
+        description="Every confidence ceiling from your instructions that applied to this "
+                    "assessment because evidence was missing (for example, no photo of a "
+                    "reported crack). Empty if none applied. Your confidence must not "
+                    "exceed any limit listed here.")
 
     @model_validator(mode="after")
     def _contra_required_unless_determinative(self):
@@ -77,14 +88,14 @@ class RepairVsReplace(BaseModel):
         return self
 
 
-# The two system prompts are the Module 2 skill files, read from skills/ at the repo
-# root rather than discovered by the SDK. setting_sources=[] (runner.py invariant 1)
+# The triage system prompt is the Module 2 skill file, read from skills/ at the repo
+# root rather than discovered by the SDK. (The repair-vs-replace skill is loaded by
+# agent/subagent.py, which is the only place it is used.) setting_sources=[] (runner.py invariant 1)
 # disables on-disk skill discovery, so a SKILL.md in .claude/skills would load nothing
 # and the call would quietly run unconstrained. See agent/skills.py.
 #
 # Loaded at import so a missing or malformed skill fails at startup, not mid-thread.
 TRIAGE_SYSTEM = load_skill(TRIAGE_SKILL)
-DECISION_SYSTEM = load_skill(DECISION_SKILL)
 
 
 async def llm_triage_steps(appliance_type: str, brand: str, issue_description: str,
@@ -129,52 +140,23 @@ async def llm_triage_steps(appliance_type: str, brand: str, issue_description: s
     }
 
 
-async def llm_assess_repair_vs_replace(appliance: dict, age_years: float, warranty: dict,
-                                       repair_cost: float, replacement_cost: float,
-                                       issue_description: str, triage_findings: str,
-                                       comparable_jobs: list[dict]) -> dict:
-    ratio = repair_cost / replacement_cost if replacement_cost else 0.0
-    response = await client().messages.parse(
-        model=KNOBS.model,
-        max_tokens=4000,
-        output_config={"effort": "medium"},
-        system=DECISION_SYSTEM,
-        messages=[{
-            "role": "user",
-            "content": (
-                f"Appliance: {appliance['brand']} {appliance['model']} "
-                f"({appliance['appliance_type']})\n"
-                f"Installed: {appliance['installation_date']}  |  Age: {age_years} years\n"
-                f"Warranty: {'IN WARRANTY until ' + warranty['expiry'] if warranty['in_warranty'] else 'out of warranty'}"
-                f" ({warranty['oem']})\n"
-                f"Estimated repair: GBP {repair_cost:.0f}\n"
-                f"Estimated replacement: GBP {replacement_cost:.0f}\n"
-                f"Repair as share of replacement: {ratio:.0%}\n"
-                f"Confidence threshold currently set to {KNOBS.confidence_threshold:.2f}\n\n"
-                f"Reported issue: {issue_description}\n\n"
-                f"What triage established:\n{triage_findings}\n\n"
-                f"Comparable past jobs:\n{json.dumps(comparable_jobs, indent=2)}"
-            ),
-        }],
-        output_format=RepairVsReplace,
-    )
-    parsed: RepairVsReplace = response.parsed_output
+def assessment_from_model(parsed: RepairVsReplace, inputs: dict) -> dict:
+    """Map the model's structured output onto the spec's output table.
+
+    Separate from the call so selftest can check the mapping without an API key.
+    """
     return {
-        "source": "llm_reasoning_call",
+        "source": "subagent",
         "model": KNOBS.model,
         "skill": DECISION_SKILL,
         "code": parsed.code,
         "confidence": round(parsed.confidence, 2),
+        "rationale": parsed.rationale,
+        "evidence_used": parsed.key_factors,
+        "evidence_missing": parsed.evidence_gaps,
+        "limits_applied": [l.model_dump() for l in parsed.limits_applied],
         "contra_indicators": parsed.contra_indicators,
-        "evidence_gaps": parsed.evidence_gaps,
         "determinative": parsed.determinative,
         "confidence_basis": "self-reported by the model, not a computed quantity",
-        "rationale": parsed.rationale,
-        "key_factors": parsed.key_factors,
-        "inputs": {
-            "age_years": age_years, "repair_cost": repair_cost,
-            "replacement_cost": replacement_cost, "cost_ratio": round(ratio, 3),
-            "in_warranty": warranty["in_warranty"],
-            "comparable_jobs_considered": len(comparable_jobs),
-        },
+        "inputs": inputs,
     }

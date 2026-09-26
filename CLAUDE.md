@@ -7,13 +7,15 @@ system (IQ, Airtable, WhatsApp, Mailgun) is mocked.
 
 Read `docs/PROJECT_MAP.md` for the one-page orientation, then `README.md` for the demo script and the architecture rationale. This file is the
 short version plus the things that will bite you.
+Module 3 work follows docs/module3/SUBAGENT_SPEC.md. If the code and the spec disagree, stop and ask. Don't resolve it silently.
 
 ## Commands
 
 ```bash
 ./run.sh                              # http://localhost:8000
-.venv/bin/python selftest.py          # 44 checks, no API key, ~1s — use this constantly
-.venv/bin/python verify.py            # all 8 scenarios against the real model (~$3)
+.venv/bin/python selftest.py          # 215 checks, no API key, ~1s — use this constantly
+.venv/bin/python verify.py            # all 14 scenarios against the real model (~$8)
+.venv/bin/python verify.py --new --runs 2 --results NAME   # repeat runs; table in docs/module3/results/
 .venv/bin/python verify.py self_fix   # one scenario, verbose trace (~$0.15–0.70)
 ```
 
@@ -29,7 +31,8 @@ prototype makes.
 1. **`tools=[]` and `setting_sources=[]` in `agent/runner.py`.** Together they mean the agent
    sees only the Iterum tool surface, on any machine. Remove either and built-ins (Read,
    Bash, WebSearch) or a stray local `CLAUDE.md` leak into the agent. `selftest.py` and every
-   `verify.py` run assert no built-in was ever reached.
+   `verify.py` run assert no built-in was ever reached. The repair-vs-replace subagent
+   (`agent/subagent.py`) is a separate session and sets both too.
 
 2. **`book_visit` is deliberately absent from `AUTONOMOUS_TOOLS`** (`agent/tools.py`). That
    omission is the entire replacement gate: tools in `allowed_tools` are auto-approved and
@@ -40,6 +43,8 @@ prototype makes.
    run first in the SDK's permission order, so the warranty block cannot be reasoned around.
    `agent/prompts.py` describes the rules so the agent behaves sensibly; the hook makes them
    true. Don't migrate one to the other.
+   *Exception:* the subagent's warranty/no-reference guard is in the `assess_repair_vs_replace` handler, because it must log a `refused` assessment and read warranty from the store rather than rely on `check_warranty` having run. The re-invocation cap of two sits beside it in `reassess_repair_vs_replace` for the same reason (it raises the ops request with the history itself); once it fires, the hook blocks booking for the rest of the thread.
+   The booking gate (`agent/gates.py`) reads the *submitted* recommendation code, never the `visit_type` the main agent passes — a code A booked as "repair" still hits the engineer gate.
 
 4. **Never pass `kind`, `seq` or `at` as a payload key to `BUS.publish()`** (`agent/events.py`).
    `publish(kind, **payload)` takes `kind` positionally, so `publish("x", kind="y")` raises
@@ -71,14 +76,21 @@ prototype makes.
 
 ```
 agent/runner.py     orchestration: one ClaudeSDKClient per issue, three loop phases
-agent/tools.py      the 15 PRD tools + 3 exit tools -> one in-process MCP server
+agent/tools.py      14 PRD tools + reassess_repair_vs_replace + 3 exit tools -> one
+                    in-process MCP server (the 15th PRD tool, search_similar_issues, belongs
+                    to the subagent)
+agent/subagent.py   the repair-vs-replace subagent: input filter, warranty/reference guard,
+                    its own session with get_appliance + search_similar_issues + two exits
+                    (submit_assessment, and submit_no_change on re-invocation)
 agent/gates.py      can_use_tool — the engineer/PM approval gate on book_visit
 agent/trace.py      PreToolUse/PostToolUse hooks — trace, guardrails, decision log
 agent/prompts.py    system prompt + per-loop instructions
-agent/fallbacks.py  rules-based path for the A/B (fault lookup + age/cost heuristic)
-agent/reasoning.py  the two LLM reasoning calls, structured output via Pydantic
+agent/fallbacks.py  rules-based path for the A/B (fault lookup + age/cost heuristic, which reads
+                    the skill's determinative table). First assessment only; never on re-invocation
+agent/reasoning.py  the triage reasoning call, and the RepairVsReplace output model
+agent/assessments.py the repair-vs-replace assessment log; submit_recommendation reads from it by ID
 agent/config.py     KNOBS — the PRD's open questions, live-editable from the UI
-agent/skills.py     loads skills/ — system prompts for the two reasoning calls, plus the
+agent/skills.py     loads skills/ — system prompts for the triage call and the subagent, plus the
                     per-fault reference section selected by fault_slug
 skills/             the Module 2 skill files: three SKILL.md, plus ten appliance fault
                     references under iterum-triage-steps/references/
@@ -86,7 +98,7 @@ server.py           FastAPI: SSE stream + the human-actor endpoints
 docs/               PRD, project map, and docs/module2/ (submitted write-up, evidence,
                     pre-skills baseline prompts)
 static/             the three-pane UI (vanilla JS, roadmap-green palette)
-scenarios/*.json    the 8 test cases; "order" drives both the UI dropdown and verify.py
+scenarios/*.json    the 14 test cases; "order" drives both the UI dropdown and verify.py
 ```
 
 **Generated — don't hand-edit:** `data/store.json` (rebuilt per scenario run),
@@ -99,7 +111,7 @@ scenarios/*.json    the 8 test cases; "order" drives both the UI dropdown and ve
 - **The Agent SDK does not read `.env`.** `server.py` and `verify.py` load it explicitly with
   `python-dotenv`. Anything new with an entry point must do the same.
 - **Verify SDK shapes against the installed package, not the docs page.** The published
-  `HookMatcher` example differs from `claude_agent_sdk` 0.2.152: the real shape is
+  `HookMatcher` example differs from `claude_agent_sdk` (0.2.159 installed): the real shape is
   `HookMatcher(matcher=..., hooks=[fn])` with callbacks taking
   `(input_data, tool_use_id, context)`. `inspect.getsource` on the installed class is the
   fastest way to check.
@@ -123,8 +135,8 @@ before publishing anything from this repo anywhere public.
 
 - §5.1's slot rule permits same-day booking when parts are in stock, and does so in practice.
   Implemented as written rather than silently fixed; a real v1 needs a minimum notice period.
-- The PM cost threshold (£400), the engineer channel, and what underlies the 75% confidence
-  figure are all unresolved in the PRD and exposed as UI dials rather than decided here.
+- The PM cost threshold (£400), the engineer channel, and what underlies the 0.7 confidence
+  threshold are all unresolved in the PRD and exposed as UI dials rather than decided here.
 - The LLM path self-reports confidence; the heuristic computes it from distance to its
   decision boundaries. These are different quantities — `confidence_basis` records which.
 - Six of the ten appliance reference files are keyed by real `label_slug` values. The other
@@ -132,9 +144,13 @@ before publishing anything from this repo anywhere public.
   category in `data/taxonomy.json`, so no `fault_slug` will ever match them and only the file
   preamble reaches the model. Either the portfolio has these types and they have logged no
   issues, or the scope list is wider than reality. Unresolved.
-- `FAULT_PATTERNS` in `fallbacks.py` and the slug-keyed reference files are now keyed the same
-  way but remain two separate sources. Deriving the former from the latter is what would make
-  PRD 4.1's "one source, cannot drift" claim literally true.
+- `FAULT_PATTERNS` in `fallbacks.py` and the slug-keyed reference files remain two separate
+  sources. `selftest.py` fails if a key has no matching reference section, which stops the keys
+  drifting but not the content. What real single-sourcing would need is PROJECT_MAP open issue #5.
+- A fallback assessment never meets the confidence threshold, whatever its computed number
+  (`assessments.meets_threshold`). What the engineer is told about a recommendation — source,
+  uncertainty, unassessed new information — is built by code (`assessments.engineer_note`), on
+  the visit and in the engineer-gate context, never taken from the main agent's message.
 - The fault content under `skills/iterum-triage-steps/references/` is general appliance
   knowledge, not Iterum service data — every file carries a status banner saying so. It needs
   engineer sign-off before it reaches a resident, the engineer-only signal rows most of all.

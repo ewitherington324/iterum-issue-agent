@@ -1,0 +1,35 @@
+{
+  "id": "messy_resident",
+  "order": 14,
+  "title": "Messy resident (free play)",
+  "summary": "The reassessment_cap persona, played freely by the model: it may mention symptoms early, bundle them or accept a date. Real residents go off-script; the checks are on the outcome, not the path.",
+  "expected": "Whatever path the conversation takes: every submission matches its assessment; every re-invocation that reached the subagent produced a new assessment or returned no_change; nothing is booked on a superseded assessment; the approvals match the final submitted code.",
+  "issue": {
+    "id": "ISS-4414",
+    "appliance_id": "app_006",
+    "resident_id": "res_006",
+    "property_id": "prop_canalside",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Oven not heating up. Resident reports the light and fan come on but it stays cold.",
+    "fault_slug_reported": "oven_not_heating",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 120.0,
+    "estimated_replacement_cost": 329.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "George Mbeki",
+    "ground_truth": "UNTIL an appointment date is offered: the oven does not heat at all. The light comes on and the fan at the back spins, but it stays cold even after half an hour on 200. The grill, the clock and the knobs all work normally. THEN, after the first appointment date is offered, he notices three more things, one at a time, in this order: (1) the grill has now stopped working too - it stays cold; (2) the clock display on the front keeps flickering and going blank; (3) the temperature knob now spins round freely without the usual clicks. None of these were happening before the first appointment offer.",
+    "behaviour": "Friendly and chatty, works shifts. Answers triage questions accurately. IMPORTANT TIMING RULE: from the first time the support service offers a specific appointment date or day, NEVER accept or decline any date. Instead, each reply from then on reports exactly ONE of the new things above, in order - one per message, never two in the same message - saying you have just noticed it, and asking whether that changes anything. After you have reported all three, if asked about dates again, say you would rather someone looked at the whole thing before you commit to a day. Never mention any of the three before the first appointment offer."
+  }
+}
