@@ -252,6 +252,37 @@ def planted_section(lines: list[str], verdicts: dict) -> None:
         verdicts[f"Judge reliable on {k}"] = all(v)
 
 
+def after_section(lines: list[str]) -> None:
+    """Re-runs of the affected cases on the fix commit. Not folded into the verdicts above,
+    which describe the system as first evaluated."""
+    a1 = read_rows(RESULTS / "a1_after.jsonl")
+    a2 = read_rows(RESULTS / "a2_after.jsonl")
+    b = read_rows(RESULTS / "tier_b_after.jsonl")
+    if not (a1 or a2 or b):
+        return
+    a2cases = {c["id"]: c for c in load_cases("a2_triage_safety.json")}
+    lines += ["## After fixes", "",
+              "The cases each fix was aimed at, re-run on the fix commit. The verdicts at the top "
+              "of this page describe the system as first evaluated; this section shows what "
+              "changed.", "",
+              "| Set | Case | Run | Commit | Result | Failed checks / judge's first concern |",
+              "|---|---|---|---|---|---|"]
+    for r in a1:
+        a = r.get("assessment") or {}
+        fails = [k for k, v in r["checks"].items() if v is False]
+        lines.append(f"| A1 | {r['case']} | {r['run']} | {r['commit']} | {r['outcome']} {a.get('code', '')} "
+                     f"{a.get('confidence', '')} | {', '.join(fails) or '—'} |")
+    for r in a2:
+        hits = a2_screen(a2cases[r["case"]], r["output"], 2)
+        first = (r["judge"]["violations"] or ["—"])[0].replace("|", "/")[:200]
+        lines.append(f"| A2 | {r['case']} | {r['run']} | {r['commit']} | screen v2: {len(hits)} hit(s); "
+                     f"judge: {'safe' if r['judge']['safe'] else '**unsafe**'} | {first} |")
+    for r in b:
+        lines.append(f"| B | {r['scenario']} | {r['run']} | {r['commit']} | {r['routing']} "
+                     f"({r['checks_passed']}/{r['checks_total']}) | {'; '.join(r['failed']) or '—'} |")
+    lines.append("")
+
+
 def main() -> None:
     verdicts: dict = {}
     body: list[str] = []
@@ -259,10 +290,14 @@ def main() -> None:
     a2_section(body, verdicts)
     b_section(body, verdicts)
     planted_section(body, verdicts)
+    after_section(body)
 
     spend = sum(r.get("cost_usd", 0) + r.get("judge_cost_usd", 0)
                 for f in ("a1.jsonl", "a2.jsonl") for r in read_rows(RESULTS / f))
+    spend += sum(r.get("cost_usd", 0) + r.get("judge_cost_usd", 0)
+                 for f in ("a1_after.jsonl", "a2_after.jsonl") for r in read_rows(RESULTS / f))
     spend += sum(r.get("cost_usd", 0) for f in ("tier_b.jsonl", "tier_b_baseline.jsonl",
+                                                 "tier_b_after.jsonl",
                                                  "judge_b.jsonl", "judge_planted.jsonl")
                  for r in read_rows(RESULTS / f))
     head = ["# Module 5 — Evaluation results", "",

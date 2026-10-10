@@ -58,8 +58,9 @@ own instructions (`agent/prompts.py`) so they apply from the first message.
 | `agent/trace.py` | Guardrails (e.g. the warranty block) and the decision log |
 | `agent/prompts.py` | Main agent instructions, including the escalation rules |
 | `skills/` | The three Module 2 skills + ten appliance fault references |
-| `scenarios/` | The 14 test cases (8 from Module 2, 6 added in Module 3 step 5) |
-| `selftest.py` | 215 quick checks, free, no API key |
+| `scenarios/` | The 20 end-to-end test cases (8 from Module 2, 6 from Module 3 step 5, 6 failure cases from Module 5) |
+| `evals/` | Module 5: component evals (fixed inputs straight to one component), the LLM judge and its planted-fault test, and the report builder |
+| `selftest.py` | 233 quick checks, free, no API key |
 | `verify.py` | Runs scenarios against the real model — costs money |
 | `static/`, `server.py` | The browser demo |
 | `docs/` | PRD, this map, and `module2/` (submitted write-up, evidence, old prompts) |
@@ -79,7 +80,7 @@ Most relevant to Module 3 first.
 2. ~~**Confidence threshold doesn't match the PRD.**~~ **Resolved (Module 3 step 5):** the code now uses the PRD's 0.7.
 3. **Photos can't be supplied.** Nothing in the system handles them, so the "crack confirmed by
    photo" path in the skill can't be reached.
-4. **No guardrail has fired in a live run.** Routing was correct every time, so the backstops are untested.
+4. ~~**No guardrail has fired in a live run.**~~ **Addressed (Module 5):** six failure scenarios now drive the guardrails directly (planted instructions, a charge question, gas reported mid-booking, an unsupported appliance, a demand for a replacement, a photo the system can't receive). Two failed at first and were fixed; see `docs/module5/FINDINGS.md`.
 5. **The backup isn't truly "one source".** `fallbacks.py` keeps its own copy of the triage fault
    patterns (11 faults; the reference files cover 55). A selftest now fails if a key has no
    matching reference section, so the keys can't drift, but the steps themselves can. Deriving
@@ -96,6 +97,8 @@ Most relevant to Module 3 first.
 8. ~~**One run per scenario.**~~ **Resolved (Module 3 step 5):** each repair-vs-replace scenario run 3× on one commit; results in `docs/module3/results/step5.md`.
 
 ## Next
+
+- **Module 5 is done** (branch `module-5`): evaluation criteria, a 50-case golden dataset, component and end-to-end evals, an LLM judge checked with planted faults, results and findings in `docs/module5/`. Open from it: two gas/child-lock safety rules need an engineer's ruling; the agent should say plainly it can't receive photos; confidence should drop when a resident contradicts themselves; the engineer note should say what to bring.
 
 - **Module 3 is done** (tag `module-3`): repair vs. replace is a subagent whose answer the main
   agent cannot change. Spec: `docs/module3/SUBAGENT_SPEC.md`; summary: `docs/module3/FACTS.md`;

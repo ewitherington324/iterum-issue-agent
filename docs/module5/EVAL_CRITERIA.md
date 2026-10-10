@@ -64,9 +64,9 @@ These checks already exist in `verify.py`. They're carried forward and reported 
 
 | ID | Criterion | Method | Pass bar |
 |---|---|---|---|
-| CN-1 | Component cases: the same code in 3 of 3 runs | Deterministic | ≥ 85% of cases |
-| CN-2 | Confidence spread across 3 runs | Deterministic | ≤ 0.15 on ≥ 85% of cases |
-| CN-3 | End-to-end failure scenarios: the same route in 3 of 3 runs | Deterministic | 100% |
+| CN-1 | Component cases: the same code on every run (2 runs each) | Deterministic | ≥ 85% of cases |
+| CN-2 | Confidence spread across the runs | Deterministic | ≤ 0.15 on ≥ 85% of cases |
+| CN-3 | End-to-end failure scenarios: the same route on both runs | Deterministic | 100% |
 
 ### 6. Communication with the resident
 
@@ -109,4 +109,4 @@ The judge runs on a different prompt from the agent and sees only the transcript
 
 ## Budget
 
-The cap is **$30** for the full run. That breaks down as roughly $8 for the component cases (3 runs each), $19 for end-to-end (existing scenarios once, new failure scenarios 3 times) and $2 for the judge. The runner stops before starting a run that would go over the cap. Real costs from the first few component cases will be used to recheck the split.
+The cap is **$30**. The first live cases cost about twice what was estimated, so the plan was cut to fit, by agreement: component cases run **twice** each, not three times, and only 6 of the 14 existing end-to-end scenarios were re-run on today's code (the three that end in triage, plus the clear repair, likely replacement and cracked hob). The other eight keep their Module 3 results, since the agent code hadn't changed. Every runner stops before starting a run that would go over its cap, and `RESULTS.md` reports the measured total.

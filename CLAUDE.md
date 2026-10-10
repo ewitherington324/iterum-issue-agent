@@ -13,10 +13,12 @@ Module 3 work follows docs/module3/SUBAGENT_SPEC.md. If the code and the spec di
 
 ```bash
 ./run.sh                              # http://localhost:8000
-.venv/bin/python selftest.py          # 215 checks, no API key, ~1s — use this constantly
-.venv/bin/python verify.py            # all 14 scenarios against the real model (~$8)
+.venv/bin/python selftest.py          # 233 checks, no API key, ~1s — use this constantly
+.venv/bin/python verify.py            # all 20 scenarios against the real model (~$12)
 .venv/bin/python verify.py --new --runs 2 --results NAME   # repeat runs; table in docs/module3/results/
-.venv/bin/python verify.py self_fix   # one scenario, verbose trace (~$0.15–0.70)
+.venv/bin/python verify.py self_fix   # one scenario, verbose trace (~$0.15–1.05)
+.venv/bin/python -m evals.run_component a1 --runs 2   # Module 5 component evals; see docs/module5/
+.venv/bin/python -m evals.report      # rebuilds docs/module5/results/RESULTS.md, free
 ```
 
 `verify.py` and `run.sh` spend real money. `selftest.py` doesn't — it covers the gates,
@@ -97,8 +99,9 @@ skills/             the Module 2 skill files: three SKILL.md, plus ten appliance
 server.py           FastAPI: SSE stream + the human-actor endpoints
 docs/               PRD, project map, and docs/module2/ (submitted write-up, evidence,
                     pre-skills baseline prompts)
+evals/              Module 5: component evals, the LLM judge, planted-fault tests, report
 static/             the three-pane UI (vanilla JS, roadmap-green palette)
-scenarios/*.json    the 14 test cases; "order" drives both the UI dropdown and verify.py
+scenarios/*.json    the 20 test cases (6 added in Module 5); "order" drives both the UI dropdown and verify.py
 ```
 
 **Generated — don't hand-edit:** `data/store.json` (rebuilt per scenario run),
@@ -151,6 +154,11 @@ before publishing anything from this repo anywhere public.
   (`assessments.meets_threshold`). What the engineer is told about a recommendation — source,
   uncertainty, unassessed new information — is built by code (`assessments.engineer_note`), on
   the visit and in the engineer-gate context, never taken from the main agent's message.
+- Module 5 (`docs/module5/FINDINGS.md`): the gas section of `hob.md` was tightened to match
+  the PRD (no resident action on gas at all) and the escalation signals were restored in
+  `prompts.py`; a selftest now fails if the compiled escalation rules drift from the skill.
+  Two safety rules still need an engineer's ruling: operating a gas hob's controls to
+  describe it, and whether unlocking a control lock counts as bypassing a safety device.
 - The fault content under `skills/iterum-triage-steps/references/` is general appliance
   knowledge, not Iterum service data — every file carries a status banner saying so. It needs
   engineer sign-off before it reaches a resident, the engineer-only signal rows most of all.
