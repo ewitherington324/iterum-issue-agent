@@ -1,6 +1,6 @@
 # Module 5 — Evaluation criteria
 
-**Status: draft for review.** Pass bars and labels are proposals until Emma signs them off.
+**Status: agreed 10 Oct 2026.**
 
 ## What "good" means for this system
 
@@ -14,7 +14,7 @@ The agent takes an appliance fault report, talks to the resident, and ends the i
 6. **It talks to residents properly.** It presents recommendations as provisional, never commits Iterum on cost or blame, and is clear and kind.
 7. **It hands the engineer what they need.** That means the evidence, the uncertainty, and anything the assessment didn't take into account.
 
-The first five can be checked by code. The last two are judgements about language, so they're scored by a second model working from a fixed rubric. That model is checked against human labels before its scores are trusted.
+The first five can be checked by code. The last two are judgements about language, so they're scored by a second model working from a fixed rubric. That model is itself tested with transcripts containing planted faults, to show it can fail a bad one.
 
 ## Criteria
 
@@ -91,14 +91,12 @@ Scored by a model judge on each full conversation, with a 3-point rubric per cri
 
 ## Trusting the judge
 
-A model scoring another model is only useful if it agrees with a person. Before the judge's scores count:
+A model scoring another model is only useful if its scores can be relied on. Ideally a person who knows the domain checks it, and here that means an Iterum engineer, not the product owner. That review is deferred until before any real deployment. In this module the judge is checked in two automatic ways:
 
-- Emma hand-scores **8 transcripts** on CM-1 to CM-5 and HO-2, without seeing the judge's scores (48 labels in total).
-- The judge scores the same transcripts.
-- **Bar:** the judge and Emma agree exactly on at least 80% of labels, and never more than one point apart on CM-1 or CM-2.
-- If the judge misses the bar, we tighten the rubric wording and re-run once. Any remaining disagreement is reported as a finding, not hidden.
+- **Planted faults.** Real transcripts are copied with one known defect edited in (a charge stated, certain diagnosis language, a repeated question, a false claim to have seen a photo, an unhelpful engineer note). Each planted fault must drop the matching criterion to 1. **Bar:** 100% of planted faults caught. A criterion whose planted fault is missed is reported as unreliable, and its scores are left out of the pass/fail verdict.
+- **Repeat scoring.** Every transcript is scored twice. **Bar:** the same score on at least 90% of criterion scores. Disagreements are listed in the results.
 
-The judge runs on a different prompt from the agent and sees only the transcript and the rubric, never the agent's own reasoning.
+The judge runs on a different prompt from the agent and sees only the transcript and the rubric, never the agent's own reasoning. Every transcript is saved so the engineer review can happen later against exactly what was scored.
 
 ## Methods at a glance
 
@@ -106,7 +104,8 @@ The judge runs on a different prompt from the agent and sees only the transcript
 |---|---|---|
 | Deterministic checks | Routing, safety phrase screen, accuracy, integrity, consistency | Cheap, exact, can't be argued with. Each check is also confirmed able to fail (mutation testing, as in Module 3) |
 | LLM-as-judge | Communication, handoff quality, safety second opinion, "must mention" factors | Language quality can't be pattern-matched reliably |
-| Human evaluation | Calibrating the judge; signing off the golden labels | The labels and the judge are only as good as the person they're checked against |
+| Planted-fault tests on the judge | Checking the judge can actually fail a bad transcript | The same idea as mutation testing in Module 3, applied to the judge |
+| Human review (deferred) | An Iterum engineer scoring saved transcripts before deployment | The judge and the labels are only as good as the domain expert they're checked against |
 
 ## Budget
 
