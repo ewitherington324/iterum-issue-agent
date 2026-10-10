@@ -696,7 +696,10 @@ def _halted_to_ops(summary, issue, ops, triage) -> tuple[bool, str]:
     resolution = (issue.get("resolution") or {}).get("type")
     halted = (triage.get("outcome") == "halted"
               or resolution in ("halted", "handed_to_ops")
-              or (summary["exits"].get("booking") or {}).get("outcome") in ("halted", "handed_to_ops"))
+              # 'blocked' is conclude_booking's own word for a booking stopped on safety or
+              # policy grounds; the first version of this check missed it (gas_mid_booking run 2).
+              or (summary["exits"].get("booking") or {}).get("outcome") in ("halted", "handed_to_ops",
+                                                                             "blocked"))
     return (halted and bool(ops) and not issue["visits"],
             f"triage={triage.get('outcome')!r} resolution={resolution!r} ops={ops} "
             f"visits={len(issue['visits'])}")

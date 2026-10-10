@@ -228,6 +228,11 @@ def b_section(lines: list[str], verdicts: dict) -> None:
             lines.append(f"| {k} | {mean:.2f} | {ones} | {bar} | {yn(ok)} |")
         lines.append("")
     total_pairs = sum(len(v) for v in allscores.values())
+    if total_pairs:
+        agree = (total_pairs - len(disagreements)) / total_pairs
+        verdicts["Judge repeat agreement ≥ 90%"] = agree >= 0.90
+        lines += [f"Repeat agreement: {agree:.0%} of criterion scores were identical on both passes "
+                  "(bar: 90%).", ""]
     if disagreements or total_pairs:
         lines += [f"Repeat scoring: {len(disagreements)} criterion scores differed between the "
                   f"two passes (of {total_pairs})."
@@ -264,7 +269,8 @@ def after_section(lines: list[str]) -> None:
     lines += ["## After fixes", "",
               "The cases each fix was aimed at, re-run on the fix commit. The verdicts at the top "
               "of this page describe the system as first evaluated; this section shows what "
-              "changed.", "",
+              "changed. A commit marked '-dirty' had uncommitted edits to the evaluation scripts "
+              "and docs at run time; the agent code and skills were exactly as committed.", "",
               "| Set | Case | Run | Commit | Result | Failed checks / judge's first concern |",
               "|---|---|---|---|---|---|"]
     for r in a1:

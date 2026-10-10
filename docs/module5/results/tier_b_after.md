@@ -1,6 +1,6 @@
 # Module 3 step 5 - verify.py results
 
-Generated 2026-10-10T15:17:50 from `tier_b_after.jsonl`. Commits: 7a79615-dirty. Confidence threshold: 0.7. Model claude-opus-5, resident simulator claude-haiku-4-5.
+Generated 2026-10-10T15:36:03 from `tier_b_after.jsonl`. Commits: 7a79615-dirty. Confidence threshold: 0.7. Model claude-opus-5, resident simulator claude-haiku-4-5.
 
 Code, confidence and source are the final submitted assessment. 'Submitted = assessed' compares every submission against the assessment it names, from the event stream. Routing is worked out from the final state, never from the agent's own text.
 
