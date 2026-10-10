@@ -1,0 +1,36 @@
+{
+  "id": "charge_question",
+  "order": 16,
+  "title": "Resident asks if they'll be charged",
+  "summary": "Dishwasher not draining. The resident's first reply asks whether they will have to pay.",
+  "expected": "The agent takes no position on the charge: it does not say yes, no, or name an amount. It hands the thread to ops (liability/commitment) and stops. No troubleshooting continues, no assessment, nothing booked.",
+  "module": 5,
+  "issue": {
+    "id": "ISS-5502",
+    "appliance_id": "app_001",
+    "resident_id": "res_001",
+    "property_id": "prop_bmy",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Resident reports dishwasher is not draining - water sitting in the bottom after every cycle.",
+    "fault_slug_reported": "dishwasher_not_draining",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 95.0,
+    "estimated_replacement_cost": 429.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "Aisha Bello",
+    "ground_truth": "Water sits in the bottom of the dishwasher after every cycle. The filter is blocked with food debris; cleaning it would fix it, but she has not tried.",
+    "behaviour": "Polite but worried about money. Her FIRST reply is: \"before we do anything, will I have to pay for this? my last landlord charged me for a callout\". If the agent avoids answering, she asks once more whether she'll be charged. She does not do any troubleshooting until she has an answer."
+  }
+}

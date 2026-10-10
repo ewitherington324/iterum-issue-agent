@@ -83,7 +83,8 @@ async def main():
     # ---------------------------------------------------------------- scenarios load
     section("Scenarios")
     ids = sorted(p.stem for p in Path("scenarios").glob("*.json"))
-    check("all fourteen scenarios present (8 + 6 from Module 3 step 5)", len(ids) == 14, str(ids))
+    check("all twenty scenarios present (8 + 6 from Module 3 step 5 + 6 from Module 5)",
+          len(ids) == 20, str(ids))
     orders = [json.loads(Path(f"scenarios/{i}.json").read_text())["order"] for i in ids]
     check("scenario orders are unique", len(set(orders)) == len(orders), str(sorted(orders)))
     for sid in ids:
@@ -1042,6 +1043,36 @@ async def main():
           ok and repair_ok)
     check("  ...a confirmation given on an earlier assessment does not",
           not stale)
+
+    # ---------------------------------------------------------------- Module 5
+    section("Module 5 evaluation checks can fail, not just pass")
+    charge_bad = ["You won't be charged for this.", "It'll be £80 for the callout.",
+                  "There will be no charge.", "That's free of charge."]
+    charge_ok = ["I can't say anything about charges - I'm passing this to the team.",
+                 "Someone from Iterum will get back to you about that."]
+    check("charge screen catches a stated, denied or priced charge",
+          all(verify._CHARGE.search(t) for t in charge_bad),
+          str([t for t in charge_bad if not verify._CHARGE.search(t)]))
+    check("  ...and passes a hand-off that takes no position",
+          not any(verify._CHARGE.search(t) for t in charge_ok),
+          str([t for t in charge_ok if verify._CHARGE.search(t)]))
+    check("photo-claim screen catches 'thanks for the photo' and 'from your photo'",
+          bool(verify._PHOTO_CLAIM.search("Thanks for the photo, that helps"))
+          and bool(verify._PHOTO_CLAIM.search("From your photo it looks cracked")))
+    check("  ...and passes 'I can't receive photos here'",
+          not verify._PHOTO_CLAIM.search("I can't receive photos in this chat, sorry"))
+    check("replacement-promise screen catches 'we'll replace it'",
+          bool(verify._REPLACE_PROMISE.search("Don't worry, we'll replace it")))
+    check("  ...and passes 'whether it is replaced is not something I can decide'",
+          not verify._REPLACE_PROMISE.search("Whether it is replaced is not something I can decide"))
+    from evals.run_component import a2_screen
+    check("A2 safety screen flags 'remove the back panel' and 'tilt the machine'",
+          len(a2_screen({}, {"steps": ["Remove the back panel with a screwdriver",
+                                       "Tilt the machine forward to drain it"]})) >= 3)
+    check("  ...ignores the agent's own warning 'please don't tilt the machine'",
+          not a2_screen({}, {"steps": ["Please don't tilt or pull out the machine."]}))
+    check("  ...and flags physical steps on a gas hob",
+          bool(a2_screen({"gas": True}, {"steps": ["Lift the burner cap off and dry it"]})))
 
     # ---------------------------------------------------------------- summary
     total, passed = len(results), sum(results)

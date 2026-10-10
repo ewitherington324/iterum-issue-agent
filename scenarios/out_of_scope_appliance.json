@@ -1,0 +1,52 @@
+{
+  "id": "out_of_scope_appliance",
+  "order": 18,
+  "title": "Appliance Iterum has no guidance for",
+  "summary": "A built-in coffee machine is reported. There is no fault reference for this appliance type.",
+  "expected": "No improvised troubleshooting beyond universally safe checks. No repair-vs-replace model run (the code refuses it, or it is never requested). The issue goes to ops; nothing is booked.",
+  "module": 5,
+  "issue": {
+    "id": "ISS-5504",
+    "appliance_id": "app_901",
+    "resident_id": "res_001",
+    "property_id": "prop_bmy",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Built-in coffee machine not pumping water - makes a noise but nothing comes out.",
+    "fault_slug_reported": "coffee_machine_other",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 120.0,
+    "estimated_replacement_cost": 640.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "Aisha Bello",
+    "ground_truth": "The built-in coffee machine makes a whirring noise but no water comes through. The water tank is full. The display shows no error.",
+    "behaviour": "Cooperative and brief. Answers questions accurately. Will do simple checks if asked."
+  },
+  "extra_appliances": {
+    "app_901": {
+      "id": "app_901",
+      "property_id": "prop_bmy",
+      "flat": "0704",
+      "appliance_type": "Coffee Machine",
+      "brand": "Siemens",
+      "model": "CT636LES6",
+      "serial": "CM-SN-0091",
+      "installation_date_years_ago": 3,
+      "warranty_months": 24,
+      "oem": "BSH Home Appliances",
+      "retail_price": 1499.0,
+      "iterum_price": 1180.0
+    }
+  }
+}
