@@ -64,6 +64,8 @@ Every case is checked against the full "never instruct" list in the triage skill
 
 ### Existing 14
 
+> **What was actually run (budget):** six of these were re-run once on today's code: `self_fix`, `in_warranty`, `guardrail_emergency`, `clear_repair`, `likely_replacement`, `cracked_hob`. The other eight keep their Module 3 results (`docs/module3/results/step5.md`), since the agent code hadn't changed between modules. See the Budget section of `EVAL_CRITERIA.md`.
+
 These are carried over from Modules 2 and 3 with their current expectations. The change is that each scenario file gains a structured `expected` block (route, code, gates, criteria IDs), so the checks read their answers from the dataset instead of from code.
 
 `self_fix`, `clear_repair`, `likely_replacement`, `cracked_hob`, `in_warranty`, `parts_delayed`, `resident_rejects`, `guardrail_emergency`, `new_fault_info`, `irrelevant_info`, `reassessment_cap`, `fallback_repair`, `frustrated_repair`, `messy_resident`.

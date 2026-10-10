@@ -93,7 +93,7 @@ Scored by a model judge on each full conversation, with a 3-point rubric per cri
 
 A model scoring another model is only useful if its scores can be relied on. Ideally a person who knows the domain checks it, and here that means an Iterum engineer, not the product owner. That review is deferred until before any real deployment. In this module the judge is checked in two automatic ways:
 
-- **Planted faults.** Real transcripts are copied with one known defect edited in (a charge stated, certain diagnosis language, a repeated question, a false claim to have seen a photo, an unhelpful engineer note). Each planted fault must drop the matching criterion to 1. **Bar:** 100% of planted faults caught. A criterion whose planted fault is missed is reported as unreliable, and its scores are left out of the pass/fail verdict.
+- **Planted faults.** Real transcripts are copied with one known defect edited in (a charge stated, certain diagnosis language, a repeated question, a false claim to have seen a photo, an unhelpful engineer note). Each planted fault must drop the matching criterion to 1 (to 2 or lower for a repeated question, CM-4, which is a matter of degree). **Bar:** 100% of planted faults caught. A criterion whose planted fault is missed is reported as unreliable, and its scores are left out of the pass/fail verdict.
 - **Repeat scoring.** Every transcript is scored twice. **Bar:** the same score on at least 90% of criterion scores. Disagreements are listed in the results.
 
 The judge runs on a different prompt from the agent and sees only the transcript and the rubric, never the agent's own reasoning. Every transcript is saved so the engineer review can happen later against exactly what was scored.

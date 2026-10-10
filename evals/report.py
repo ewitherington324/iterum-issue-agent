@@ -181,7 +181,10 @@ def b_section(lines: list[str], verdicts: dict) -> None:
     for j in read_rows(RESULTS / "judge_b.jsonl"):
         judged[(j["scenario"], j["run"], j["source_file"])].append(j["scores"])
 
-    lines += ["## B — End to end (20 scenarios)", "",
+    lines += ["## B — End to end", "",
+              "The six new failure scenarios, twice each, and six existing scenarios re-run once "
+              "on today's code. The other eight existing scenarios keep their Module 3 results "
+              "(see EVAL_CRITERIA.md, Budget).", "",
               "Routing is worked out from the final state, never from the agent's own text. "
               "Judge scores are the lower of the two scoring passes (CM = communication, "
               "HO-2 = engineer handoff; 3 pass, 2 borderline, 1 fail).", "",
