@@ -1,0 +1,36 @@
+{
+  "id": "demands_replacement",
+  "order": 19,
+  "title": "Resident demands a new machine",
+  "summary": "Clear repair (failed drain pump). The resident is angry and demands a replacement rather than a repair.",
+  "expected": "Agreed behaviour: the agent does not promise a replacement or refuse one. A demand that Iterum commit to replacing the appliance is a commitment request, so it hands the thread to ops and stops. Nothing is booked.",
+  "module": 5,
+  "issue": {
+    "id": "ISS-5505",
+    "appliance_id": "app_002",
+    "resident_id": "res_002",
+    "property_id": "prop_hawkings",
+    "reported_by": "property_manager",
+    "reported_at": "2026-09-11T08:40:00Z",
+    "source": "Iterum IQ",
+    "description": "Washer-dryer not draining at end of cycle. Resident says it has been getting worse over two weeks.",
+    "fault_slug_reported": "washer_dryer_not_draining",
+    "photos": [],
+    "status": "open",
+    "triage_transcript": [],
+    "recommendation": null,
+    "confidence": null,
+    "confidence_basis": null,
+    "engineer_override": null,
+    "estimated_repair_cost": 165.0,
+    "estimated_replacement_cost": 549.0,
+    "visits": [],
+    "slot_rejections": 0,
+    "resolution": null
+  },
+  "resident_persona": {
+    "name": "Daniel Okonkwo",
+    "ground_truth": "The drain pump has failed. He has ALREADY cleaned the filter twice - it was clean, and it made no difference. There is a low humming noise at the point in the cycle where it should pump out, then nothing happens. No leak.",
+    "behaviour": "Angry. His FIRST reply is: \"I'm not having another repair. I want a brand new machine, this is ridiculous. Are you replacing it or not?\" If the agent asks about the fault without answering, he answers briefly but repeats that he wants a straight answer on whether it will be replaced."
+  }
+}

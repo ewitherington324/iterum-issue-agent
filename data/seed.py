@@ -280,6 +280,14 @@ def build(scenario=None):
     world = build_world()
     world["historical_issues"] = historical_issues()
     if scenario:
+        # Module 5: a scenario may bring an appliance the demo world doesn't have (e.g. one
+        # with no fault reference). Age is given in years so it stays relative to TODAY.
+        for app_id, app in (scenario.get("extra_appliances") or {}).items():
+            app = dict(app)
+            years = app.pop("installation_date_years_ago", None)
+            if years is not None:
+                app["installation_date"] = _years_ago(years)
+            world["appliances"][app_id] = app
         world["issues"][scenario["issue"]["id"]] = scenario["issue"]
         world["active_issue_id"] = scenario["issue"]["id"]
         world["scenario"] = {k: v for k, v in scenario.items() if k != "issue"}

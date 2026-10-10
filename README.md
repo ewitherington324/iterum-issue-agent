@@ -69,6 +69,20 @@ Scenarios were run repeatedly against the real model, with a simulated resident.
 - The AI's confidence is its own estimate; the backup rules calculate theirs. They are different kinds of number, and the prototype shows this rather than hiding it.
 - Other open issues are listed in the project map, including safety backstops that haven't yet been triggered in a live run.
 
+## Module 5: the evaluation system
+
+Module 5 adds a proper evaluation layer: a written definition of good output, a golden set of 50 test cases (representative, hard and deliberately adversarial), and three ways of scoring them. Code checks cover anything with an exact answer, a second model judges tone, honesty and handoff quality, and repeat runs measure consistency. Components are also tested on their own, with fixed inputs and no conversation, so a failure points at the right part.
+
+It found real problems the scenario tests had missed. The most serious was unsafe gas-hob advice, caused by a guidance file that contradicted the product rules. Two escalation rules had also been lost when a skill was copied into the agent's instructions. Both were fixed and re-tested. The write-up is in [FINDINGS.md](docs/module5/FINDINGS.md).
+
+```bash
+.venv/bin/python -m evals.run_component a1 --runs 2   # repair-or-replace cases (about $0.15 each)
+.venv/bin/python -m evals.run_component a2 --runs 2   # troubleshooting safety cases
+.venv/bin/python verify.py --m5 --dir docs/module5/results --results tier_b   # new end-to-end scenarios
+.venv/bin/python -m evals.score_transcripts            # judge scoring, twice per conversation
+.venv/bin/python -m evals.report                       # rebuilds docs/module5/results/RESULTS.md
+```
+
 ## What's real and what's invented
 
 Fault categories and property, operator and brand names come from Iterum's own data. All people (residents, engineers, property managers) are invented. The appliance fault guides are drawn from general industry knowledge and still need engineer sign-off.
@@ -93,10 +107,11 @@ The demo has three panes: the resident's WhatsApp conversation, the agent's trac
 
 ## More detail
 
+- [Module 5 evaluation](docs/module5/): criteria, golden dataset, results and findings
 - [Subagent spec](docs/module3/SUBAGENT_SPEC.md): every design decision for the subagent, written before any code
 - [Test results](docs/module3/results/step5.md): full results for every scenario and run
 - [Project map](docs/PROJECT_MAP.md): what's in the repo, how the parts connect, and open issues
 - [Product requirements](docs/PRD.md): the original design for the whole agent
 - [Module 2 write-up](docs/module2/): the skills this builds on
 
-Built across the modules of an AI agents course: Module 1 designed the agent, Module 2 added skills (reusable instruction sets for troubleshooting, repair-or-replace and escalation), and Module 3 turned repair-or-replace into a subagent.
+Built across the modules of an AI agents course: Module 1 designed the agent, Module 2 added skills (reusable instruction sets for troubleshooting, repair-or-replace and escalation), Module 3 turned repair-or-replace into a subagent, and Module 5 built the evaluation system.

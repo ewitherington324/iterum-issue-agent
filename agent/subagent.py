@@ -330,7 +330,9 @@ def build_brief(issue: dict, appliance: dict, args: dict) -> dict:
         "warranty_expiry": warranty["expiry"],
         "estimated_repair_cost": repair,
         "estimated_replacement_cost": replace,
-        "cost_ratio": round(repair / replace, 3) if replace else None,
+        # Either cost may be missing on a real issue (Module 5, A1-20): the skill says to
+        # assess on cost bands with lower confidence, so the brief says "unknown".
+        "cost_ratio": round(repair / replace, 3) if (repair is not None and replace) else None,
         "confidence_threshold": KNOBS.confidence_threshold,
         "troubleshooting": [{"step": t["step"], "result": t["result"]}
                             for t in args.get("troubleshooting") or []],
@@ -375,6 +377,9 @@ def render_brief(b: dict) -> str:
                + bullets(f'"{q}"' for q in b["new_information"]))
 
     ratio = f"{b['cost_ratio']:.0%}" if b["cost_ratio"] is not None else "unknown"
+
+    def gbp(v):
+        return f"GBP {v:.0f}" if v is not None else "unknown - no estimate on the issue record"
     return (
         f"Assess repair versus replace for issue {b['issue_id']}.\n\n"
         f"Appliance id: {b['appliance_id']} ({b['appliance_type']}) - look it up with "
@@ -383,8 +388,8 @@ def render_brief(b: dict) -> str:
         f"Warranty (from Iterum records): "
         f"{'IN WARRANTY' if b['in_warranty'] else 'out of warranty'}, "
         f"expiry {b['warranty_expiry']}\n"
-        f"Estimated repair: GBP {b['estimated_repair_cost']:.0f}\n"
-        f"Estimated replacement: GBP {b['estimated_replacement_cost']:.0f}\n"
+        f"Estimated repair: {gbp(b['estimated_repair_cost'])}\n"
+        f"Estimated replacement: {gbp(b['estimated_replacement_cost'])}\n"
         f"Repair as share of replacement: {ratio}\n"
         f"Confidence threshold currently set to {b['confidence_threshold']:.2f}\n\n"
         f"Logged by the property manager (second-hand):\n  {b['pm_description']}\n\n"

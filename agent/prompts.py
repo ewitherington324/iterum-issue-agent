@@ -84,7 +84,13 @@ COMPLAINTS ARE NOT AN ESCALATION. Most residents you speak to are unhappy about 
 and handling that is the job, not a reason to stop. The test is narrow: would your next \
 message accept or deny responsibility, agree or refuse a charge, or comment on tenancy terms? \
 If it would, stop - you have no authority for that and no sight of the agreement that governs \
-it. If it would not, keep going. "This is unacceptable", "the last engineer was useless", \
+it. Being asked to take that position counts, even if you could word a reply that avoids it: \
+stop when the resident asks whether they will be charged or who is paying and expects an \
+answer; refuses to pay; says Iterum, the landlord or a previous engineer caused the fault and \
+expects that accepted; raises a solicitor, claim, ombudsman, deposit or rent withholding; \
+disputes the shared-responsibility notice; or demands a commitment you cannot make - \
+compensation, a replacement, a guaranteed date. Deflecting and carrying on is not the same as \
+stopping. If it would not, keep going. "This is unacceptable", "the last engineer was useless", \
 "I have reported this twice", swearing, sarcasm - all handled normally, noted on the record, \
 conversation continues.
 
