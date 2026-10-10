@@ -8,11 +8,12 @@
 
 Three technologies — gas, induction, ceramic-electric — with different fault sets and very different safety boundaries. **Establish which the hob is before proposing anything. If it cannot be established, treat it as gas and propose nothing.**
 
-Work on gas appliances is restricted by law to engineers on a national registration scheme (Gas Safe in the UK, with equivalents elsewhere). This is a legal boundary, not a judgement call, and **it applies across every slug below**. Wherever a section names a gas cause, the only permitted resident actions are:
+Work on gas appliances is restricted by law to engineers on a national registration scheme (Gas Safe in the UK, with equivalents elsewhere). This is a legal boundary, not a judgement call, and **it applies across every slug below**. Wherever a section names a gas cause, the only permitted resident action is:
 
-- Describing what they observe — which burners light, what the flame looks like, what they hear.
-- Checking that burner caps and crowns sit flat and correctly seated, clean and dry. These lift off and on by hand and are designed to be removed for cleaning.
-- Nothing else. Not the ignition, not the jets, not the supply, not the connection.
+- Describing what they observe — which burners light, what the flame looks like, what they hear, and whether a cap or crown looks visibly out of place.
+- Nothing else. Do not ask the resident to lift, dry, clean or reseat caps or crowns, or to try relighting a burner that has failed. Not the ignition, not the jets, not the supply, not the connection.
+
+> **Changed in Module 5.** This section used to permit lifting, drying and reseating burner caps by hand. That contradicted the PRD and the triage skill, which allow no resident troubleshooting on gas appliances at all, and the evaluation showed the model following this file over the skill. Brought into line with the PRD; a registered engineer should confirm which rule is right before either reaches a resident.
 
 | Gas signal | Meaning | Route |
 |---|---|---|
@@ -34,10 +35,10 @@ The caller passes a `fault_slug`. Match it exactly against a section heading bel
 | Pan not ferrous, or too small for the zone | Induction | Fridge magnet on the pan base; no firm stick, no heat | The commonest induction "fault" |
 | Control or child lock | Induction/ceramic | Key or padlock symbol showing? | |
 | Isolator off, breaker tripped | Induction/ceramic | Wall cooker switch on? Other kitchen appliances working? | Never a consumer-unit reset |
-| Caps or crowns dislodged, wet, dirty | Gas | Lift off, dry, reseat flat by hand | The only permitted gas action |
+| Caps or crowns dislodged, wet, dirty | Gas | Describe only: does a cap look out of place? | Engineer — no resident action on gas |
 | Element, thermostat, inverter board, blocked gas ports | All | — | Engineer |
 
-**Engineer-only signals:** nothing heats with a ferrous pan and the lock off; other kitchen circuits dead (property fault — route to ops); burning smell (escalate); a gas hob still failing after caps are reseated.
+**Engineer-only signals:** nothing heats with a ferrous pan and the lock off; other kitchen circuits dead (property fault — route to ops); burning smell (escalate); any gas hob burner that won't light or burns unevenly.
 
 ---
 
@@ -48,7 +49,7 @@ The caller passes a `fault_slug`. Match it exactly against a section heading bel
 | Cooker isolator off, or breaker tripped | Induction/ceramic | Wall switch on? Other kitchen appliances working? | Never ask them to reset the consumer unit |
 | Socket switched off | Socket-fed only | Switch off and back on at the wall socket | |
 | Lock on, or blank after a power cut | Induction/ceramic | Key or padlock symbol? What shows on the display? | |
-| No spark on ignition | Gas | Confirm caps seated, burner dry | Otherwise engineer — ignition module or wet electrodes |
+| No spark on ignition | Gas | Describe only: any clicking? | Engineer — ignition module, wet electrodes or misseated cap |
 | Supply or main board failure | All | — | Engineer |
 
 **Engineer-only signals:** dead with power confirmed at the isolator; whole kitchen circuit dead; any burning smell.
@@ -62,7 +63,7 @@ The caller passes a `fault_slug`. Match it exactly against a section heading bel
 | Power sharing between paired zones | Induction | Was the neighbouring zone in use? | Normal design behaviour |
 | Pan unsuitable for that zone | Induction | Magnet test it; does another pan work there? | |
 | Wrong control mapped to the zone | All | Which control do they turn for it? | |
-| Cap misseated on that burner | Gas | Lift off, dry, reseat flat | Nothing further |
+| Cap misseated on that burner | Gas | Describe only: does the cap look out of place? | Engineer |
 | Element, switch, coil or inverter failure | Induction/ceramic | Confirm control position, lock off | Engineer. Stop using that zone |
 
 **Engineer-only signals:** a zone failing with a ferrous pan, no power sharing and the lock off; a zone that will not switch off. Record which zone — it tells the engineer which part to bring.
@@ -126,7 +127,7 @@ Induction hobs are audibly active in normal use. Establish whether the noise is 
 |---|---|---|---|
 | Cooling fan, including after switch-off | Induction | Does it stop a few minutes after use? | Normal |
 | Buzz or hum rising with the setting; clicking at low power | Induction | Does it change with a different pan? | Normal |
-| Rattling pan support or burner cap | Gas | Reseat by hand | Nothing further |
+| Rattling pan support or burner cap | Gas | Describe only | Engineer if it persists — no resident action on gas |
 | Fan bearing, or buzzing from controls | All | — | Engineer. Stop using |
 
 **Engineer-only signals:** grinding or screeching; noise with a burning smell; noise continuing with the hob off. Hissing on a gas hob with any odour is a gas escalation, not triage.

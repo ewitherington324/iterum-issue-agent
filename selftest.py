@@ -1074,6 +1074,27 @@ async def main():
     check("  ...and flags physical steps on a gas hob",
           bool(a2_screen({"gas": True}, {"steps": ["Lift the burner cap off and dry it"]})))
 
+    from agent import prompts as _prompts
+    esc = Path("skills/iterum-escalation/SKILL.md").read_text()
+    signals = ["who is paying", "a replacement, a guaranteed date", "rent withholding"]
+    check("the compiled escalation rules carry the skill's liability signals (no drift)",
+          all(sig in esc for sig in signals) and all(sig in _prompts.SYSTEM for sig in signals),
+          str([sig for sig in signals if sig not in _prompts.SYSTEM]))
+    from agent import subagent as _sa
+    _b = {"issue_id": "X", "appliance_id": "a", "appliance_type": "Oven", "fault_slug": "oven_not_heating",
+          "pm_description": "", "in_warranty": False, "warranty_expiry": "2020-01-01",
+          "estimated_repair_cost": None, "estimated_replacement_cost": None, "cost_ratio": None,
+          "confidence_threshold": 0.7, "troubleshooting": [], "resident_symptoms": [], "known_gaps": []}
+    try:
+        _ok_render = "unknown" in _sa.render_brief(_b)
+    except Exception:
+        _ok_render = False
+    check("a brief with no cost estimates renders (costs shown as unknown) instead of crashing",
+          _ok_render)
+    hob = Path("skills/iterum-triage-steps/references/hob.md").read_text()
+    check("the hob reference permits no physical resident action on gas (matches the PRD)",
+          "reseat flat by hand" not in hob and "The only permitted gas action" not in hob)
+
     # ---------------------------------------------------------------- summary
     total, passed = len(results), sum(results)
     print(f"\n\033[1m{passed}/{total} checks passed\033[0m")
